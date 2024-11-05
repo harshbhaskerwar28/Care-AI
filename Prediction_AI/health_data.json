@@ -1,0 +1,145 @@
+{
+  "prediction_types": {
+    "diabetes": {
+      "name": "Diabetes Risk Assessment",
+      "icon": "D",
+      "required_metrics": ["glucose_fasting", "glucose_post_meal", "weight", "height"],
+      "description": "Evaluates your risk of diabetes based on blood glucose levels and body composition",
+      "recommended_frequency": "Every 6 months"
+    },
+    "heart": {
+      "name": "Heart Health Screening",
+      "icon": "H",
+      "required_metrics": ["heart_rate", "bp_systolic", "bp_diastolic", "weight", "height"],
+      "description": "Assesses your cardiovascular health based on vital signs and body composition",
+      "recommended_frequency": "Every 3 months"
+    },
+    "obesity": {
+      "name": "Weight Status Analysis",
+      "icon": "W",
+      "required_metrics": ["weight", "height"],
+      "description": "Evaluates your weight status and related health risks",
+      "recommended_frequency": "Monthly"
+    }
+  },
+  "metrics": {
+    "glucose": {
+      "fasting": {
+        "ranges": {
+          "normal": {"min": 70, "max": 99, "description": "Normal fasting glucose level"},
+          "prediabetes": {"min": 100, "max": 125, "description": "Pre-diabetic range"},
+          "diabetes": {"min": 126, "max": 200, "description": "Diabetic range"}
+        },
+        "unit": "mg/dL",
+        "weight": 0.3,
+        "measurement_conditions": "8 hours fasting",
+        "ideal_range": "70-99 mg/dL"
+      },
+      "post_meal": {
+        "ranges": {
+          "normal": {"min": 70, "max": 139, "description": "Normal post-meal glucose"},
+          "prediabetes": {"min": 140, "max": 199, "description": "Pre-diabetic range"},
+          "diabetes": {"min": 200, "max": 300, "description": "Diabetic range"}
+        },
+        "unit": "mg/dL",
+        "weight": 0.2,
+        "measurement_conditions": "2 hours after meal",
+        "ideal_range": "70-139 mg/dL"
+      }
+    },
+    "body_composition": {
+      "weight": {
+        "unit": "kg",
+        "min": 30,
+        "max": 200,
+        "default": 70
+      },
+      "height": {
+        "unit": "m",
+        "min": 1.0,
+        "max": 2.5,
+        "default": 1.70
+      },
+      "bmi": {
+        "ranges": {
+          "underweight": {"min": 0, "max": 18.4, "description": "Below healthy weight range"},
+          "normal": {"min": 18.5, "max": 24.9, "description": "Healthy weight range"},
+          "overweight": {"min": 25, "max": 29.9, "description": "Above healthy weight range"},
+          "obese": {"min": 30, "max": 50, "description": "Significantly above healthy weight range"}
+        },
+        "unit": "kg/m2",
+        "weight": 0.15,
+        "ideal_range": "18.5-24.9"
+      }
+    },
+    "vitals": {
+      "heart_rate": {
+        "ranges": {
+          "low": {"min": 40, "max": 59, "description": "Below normal resting heart rate"},
+          "normal": {"min": 60, "max": 100, "description": "Normal resting heart rate"},
+          "high": {"min": 101, "max": 130, "description": "Above normal resting heart rate"}
+        },
+        "unit": "bpm",
+        "weight": 0.1,
+        "measurement_conditions": "At rest",
+        "ideal_range": "60-100 bpm"
+      },
+      "blood_pressure_systolic": {
+        "ranges": {
+          "normal": {"min": 90, "max": 120, "description": "Normal systolic pressure"},
+          "elevated": {"min": 121, "max": 129, "description": "Elevated systolic pressure"},
+          "high": {"min": 130, "max": 180, "description": "High systolic pressure"}
+        },
+        "unit": "mmHg",
+        "weight": 0.15,
+        "ideal_range": "90-120 mmHg"
+      },
+      "blood_pressure_diastolic": {
+        "ranges": {
+          "normal": {"min": 60, "max": 80, "description": "Normal diastolic pressure"},
+          "high": {"min": 81, "max": 120, "description": "High diastolic pressure"}
+        },
+        "unit": "mmHg",
+        "weight": 0.1,
+        "ideal_range": "60-80 mmHg"
+      }
+    }
+  },
+  "risk_factors": {
+    "age": {
+      "ranges": {
+        "low": {"min": 18, "max": 35},
+        "moderate": {"min": 36, "max": 50},
+        "high": {"min": 51, "max": 120}
+      },
+      "weight": 0.1
+    },
+    "family_history": {
+      "weight": 0.15
+    }
+  },
+  "recommendations": {
+    "lifestyle": {
+      "exercise": [
+        "Regular physical activity (150 minutes per week)",
+        "Mix of cardio and strength training",
+        "Daily walking"
+      ],
+      "diet": [
+        "Balanced nutrition",
+        "Portion control",
+        "Regular meal timing"
+      ],
+      "sleep": [
+        "7-9 hours per night",
+        "Consistent sleep schedule",
+        "Good sleep hygiene"
+      ]
+    },
+    "monitoring": {
+      "diabetes": "Check blood sugar regularly",
+      "heart": "Monitor blood pressure weekly",
+      "obesity": "Weekly weight checks"
+    }
+  }
+}
