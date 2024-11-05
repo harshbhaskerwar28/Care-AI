@@ -17,7 +17,7 @@ COLOR_SCHEME = {
     'warning': '#FBBF24',
     'danger': '#EF4444',
     'background': '#F3F4F6',
-    'text': '#1F2937'
+    'text': '#000000'
 }
 
 # Load configuration
@@ -160,58 +160,58 @@ def get_health_insights(metrics, prediction_type):
         # Glucose insights
         if metrics.get('glucose_fasting'):
             if metrics['glucose_fasting'] < 100:
-                insights.append("• Your fasting glucose is in the normal range.")
+                insights.append("\n • Your fasting glucose is in the normal range.")
             elif metrics['glucose_fasting'] < 126:
-                insights.append("• Your fasting glucose indicates pre-diabetes risk.")
+                insights.append("\n • Your fasting glucose indicates pre-diabetes risk.")
             else:
-                insights.append("• Your fasting glucose is elevated, suggesting diabetes risk.")
+                insights.append("\n • Your fasting glucose is elevated, suggesting diabetes risk.")
         
         if metrics.get('glucose_post_meal'):
             if metrics['glucose_post_meal'] < 140:
-                insights.append("• Your post-meal glucose is normal.")
+                insights.append("\n • Your post-meal glucose is normal.")
             elif metrics['glucose_post_meal'] < 200:
-                insights.append("• Your post-meal glucose suggests pre-diabetes risk.")
+                insights.append("\n • Your post-meal glucose suggests pre-diabetes risk.")
             else:
-                insights.append("• Your post-meal glucose is high, indicating diabetes risk.")
+                insights.append("\n • Your post-meal glucose is high, indicating diabetes risk.")
     
     elif prediction_type == "heart":
         # Blood pressure insights
         if metrics.get('bp_systolic') and metrics.get('bp_diastolic'):
             if metrics['bp_systolic'] < 120 and metrics['bp_diastolic'] < 80:
-                insights.append("• Your blood pressure is in the normal range.")
+                insights.append("\n • Your blood pressure is in the normal range.")
             elif metrics['bp_systolic'] < 130 and metrics['bp_diastolic'] < 80:
-                insights.append("• Your blood pressure is slightly elevated.")
+                insights.append("\n • Your blood pressure is slightly elevated.")
             else:
-                insights.append("• Your blood pressure is high. Consider lifestyle changes.")
+                insights.append("\n • Your blood pressure is high. Consider lifestyle changes.")
         
         # Heart rate insights
         if metrics.get('heart_rate'):
             if 60 <= metrics['heart_rate'] <= 100:
-                insights.append("• Your resting heart rate is normal.")
+                insights.append("\n • Your resting heart rate is normal.")
             elif metrics['heart_rate'] < 60:
-                insights.append("• Your heart rate is low. This might be normal for athletes.")
+                insights.append("\n • Your heart rate is low. This might be normal for athletes.")
             else:
-                insights.append("• Your heart rate is elevated.")
+                insights.append("\n • Your heart rate is elevated.")
     
     # BMI insights
     if metrics.get('bmi'):
         bmi_category = get_bmi_category(metrics['bmi'])
         if bmi_category == "normal":
-            insights.append("• Your BMI is in the healthy range.")
+            insights.append("\n • Your BMI is in the healthy range.")
         elif bmi_category == "underweight":
-            insights.append("• Your BMI indicates you may be underweight.")
+            insights.append("\n • Your BMI indicates you may be underweight.")
         elif bmi_category == "overweight":
-            insights.append("• Your BMI indicates you may be overweight.")
+            insights.append("\n • Your BMI indicates you may be overweight.")
         elif bmi_category == "obese":
-            insights.append("• Your BMI indicates obesity. Consider consulting a healthcare provider.")
+            insights.append("\n • Your BMI indicates obesity. Consider consulting a healthcare provider.")
     
     # Add general recommendations
     insights.append("\n**General Recommendations:**")
-    insights.append("• Maintain a balanced diet rich in whole foods")
-    insights.append("• Engage in regular physical activity (150 minutes per week)")
-    insights.append("• Get 7-9 hours of quality sleep each night")
-    insights.append("• Manage stress through relaxation techniques")
-    insights.append("• Stay hydrated and limit alcohol consumption")
+    insights.append("\n • Maintain a balanced diet rich in whole foods")
+    insights.append("\n • Engage in regular physical activity (150 minutes per week)")
+    insights.append("\n • Get 7-9 hours of quality sleep each night")
+    insights.append("\n • Manage stress through relaxation techniques")
+    insights.append("\n • Stay hydrated and limit alcohol consumption")
     
     return "\n".join(insights)
 
@@ -245,7 +245,7 @@ def main():
         }
         
         .metric-container {
-            background-color: white;
+            background-color: black;
             padding: 2rem;
             border-radius: 15px;
             margin: 1rem 0;
@@ -253,7 +253,7 @@ def main():
         }
         
         .sidebar {
-            background-color: white;
+            background-color: black;
             padding: 2rem;
             border-right: 1px solid #E5E7EB;
         }
@@ -442,7 +442,7 @@ def main():
                 # Disclaimer
                 st.markdown("---")
                 st.markdown("""
-                    <div style='background-color: white; padding: 1rem; border-radius: 10px; 
+                    <div style='background-color: black; padding: 1rem; border-radius: 10px; 
                               border-left: 4px solid #4F46E5; font-size: 0.9em;'>
                         <strong>Disclaimer:</strong> This tool provides general health insights and should not be used 
                         as a substitute for professional medical advice. Always consult with healthcare professionals 
