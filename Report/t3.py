@@ -321,17 +321,17 @@ def main():
                 except Exception as e:
                     st.error(f"Error processing report: {str(e)}")
         
-        # Display agent status
-        # Initialize the status display
-st.session_state.agent_status.initialize_sidebar_placeholder()
+    
+    # Initialize the status display
+    st.session_state.agent_status.initialize_sidebar_placeholder()
 
-# Update status (use this whenever you need to update an agent's status)
-st.session_state.agent_status.update_status(
-    agent_name='positive_analyzer',  # or whatever agent
-    status='working',  # 'idle', 'working', 'completed', or 'error'
-    progress=0.5,  # progress from 0 to 1
-    message='Processing data...'  # status message
-)
+    # Update status (use this whenever you need to update an agent's status)
+    st.session_state.agent_status.update_status(
+        agent_name='positive_analyzer',  # or whatever agent
+        status='working',  # 'idle', 'working', 'completed', or 'error'
+        progress=0.5,  # progress from 0 to 1
+        message='Processing data...'  # status message
+    )
     
     # Main content area
     st.title("Health Report Analysis")
