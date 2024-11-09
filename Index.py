@@ -1,171 +1,136 @@
 import streamlit as st
-import base64
-from PIL import Image
 import streamlit.components.v1 as components
+from PIL import Image
+import base64
 
 # Configure the page settings
 st.set_page_config(
-    page_title="Multi-Project Dashboard",
+    page_title="Project Hub",
     page_icon="🏠",
-    layout="wide",
+    layout="wide"
 )
 
-# Apply dark theme styling
-dark_theme_css = """
-<style>
-    .stApp {
-        background-color: #0E1117;
-        color: #FAFAFA;
-    }
-    .project-card {
-        background-color: #262730;
-        border-radius: 10px;
-        padding: 20px;
-        margin: 10px;
-        cursor: pointer;
-        transition: transform 0.3s ease;
-    }
-    .project-card:hover {
-        transform: translateY(-5px);
-    }
-    .card-title {
-        color: #FFFFFF;
-        font-size: 20px;
-        font-weight: bold;
-        margin-bottom: 10px;
-    }
-    .card-description {
-        color: #C2C2C2;
-        font-size: 14px;
-    }
-</style>
-"""
-st.markdown(dark_theme_css, unsafe_allow_html=True)
-
-def load_and_resize_logo(logo_path, width=150):
-    """Load and resize the logo image"""
-    try:
-        image = Image.open(logo_path)
-        # Maintain aspect ratio while resizing
-        aspect_ratio = image.size[1] / image.size[0]
-        height = int(width * aspect_ratio)
-        image = image.resize((width, height))
-        return image
-    except Exception as e:
-        st.error(f"Error loading logo: {e}")
-        return None
-
-def create_project_card(title, description, key):
-    """Create a clickable project card with custom styling"""
-    card_html = f"""
-    <div class="project-card" onclick="handle_click_{key}()">
-        <div class="card-title">{title}</div>
-        <div class="card-description">{description}</div>
-    </div>
-    <script>
-        function handle_click_{key}() {{
-            window.parent.postMessage({{
-                type: 'streamlit:setComponentValue',
-                value: '{key}'
-            }}, '*');
-        }}
-    </script>
-    """
-    return card_html
+# Custom CSS for dark theme and styling
+def apply_custom_style():
+    st.markdown("""
+        <style>
+        /* Dark theme background */
+        .stApp {
+            background-color: #1E1E1E;
+            color: white;
+        }
+        
+        /* Custom button styling */
+        .custom-button {
+            background-color: #2E2E2E;
+            color: white;
+            padding: 20px 40px;
+            border-radius: 10px;
+            border: 1px solid #4E4E4E;
+            cursor: pointer;
+            margin: 10px;
+            width: 250px;
+            font-size: 18px;
+            transition: all 0.3s;
+        }
+        
+        .custom-button:hover {
+            background-color: #4E4E4E;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        
+        /* Container styling */
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        /* Logo styling */
+        .logo-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+        }
+        
+        /* Title styling */
+        .title {
+            color: white;
+            font-size: 48px;
+            text-align: center;
+            margin-bottom: 50px;
+            font-weight: bold;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
 def main():
-    # Header section with logo
+    apply_custom_style()
+    
+    # Add logo (replace 'logo.png' with your logo path)
+    # st.image("logo.png", width=100)  # Uncomment and add your logo
+    
+    # Main title
+    st.markdown('<p class="title">Project Hub</p>', unsafe_allow_html=True)
+    
+    # Center container for buttons
     col1, col2, col3 = st.columns([1, 2, 1])
-    with col1:
-        # Replace 'path_to_your_logo.png' with your actual logo path
-        logo = load_and_resize_logo('path_to_your_logo.png')
-        if logo:
-            st.image(logo)
-
-    # Title in center column
+    
     with col2:
-        st.title("Project Dashboard")
+        # Project 1 Button
+        if st.button("Project 1", key="btn1", help="Click to open Project 1"):
+            st.session_state.current_project = "project1"
+            
+        # Project 2 Button
+        if st.button("Project 2", key="btn2", help="Click to open Project 2"):
+            st.session_state.current_project = "project2"
+            
+        # Project 3 Button
+        if st.button("Project 3", key="btn3", help="Click to open Project 3"):
+            st.session_state.current_project = "project4"
+            
+        # Project 4 Button
+        if st.button("Project 4", key="btn4", help="Click to open Project 4"):
+            st.session_state.current_project = "project4"
 
-    # Create two rows with two cards each
-    row1_col1, row1_col2 = st.columns(2)
-    row2_col1, row2_col2 = st.columns(2)
+    # Initialize session state for project selection if not exists
+    if 'current_project' not in st.session_state:
+        st.session_state.current_project = None
 
-    # Project 1
-    with row1_col1:
-        components.html(
-            create_project_card(
-                "Project 1",
-                "Description of your first project",
-                "project1"
-            ),
-            height=200
-        )
-        if st.session_state.get('selected_project') == 'project1':
-            st.write("Project 1 Content")
-            # ===== ADD YOUR PROJECT 1 CODE HERE =====
-            # def project1_main():
-            #     Your code here
-            # project1_main()
-
-    # Project 2
-    with row1_col2:
-        components.html(
-            create_project_card(
-                "Project 2",
-                "Description of your second project",
-                "project2"
-            ),
-            height=200
-        )
-        if st.session_state.get('selected_project') == 'project2':
-            st.write("Project 2 Content")
-            # ===== ADD YOUR PROJECT 2 CODE HERE =====
-            # def project2_main():
-            #     Your code here
-            # project2_main()
-
-    # Project 3
-    with row2_col1:
-        components.html(
-            create_project_card(
-                "Project 3",
-                "Description of your third project",
-                "project3"
-            ),
-            height=200
-        )
-        if st.session_state.get('selected_project') == 'project3':
-            st.write("Project 3 Content")
-            # ===== ADD YOUR PROJECT 3 CODE HERE =====
-            # def project3_main():
-            #     Your code here
-            # project3_main()
-
-    # Project 4
-    with row2_col2:
-        components.html(
-            create_project_card(
-                "Project 4",
-                "Description of your fourth project",
-                "project4"
-            ),
-            height=200
-        )
-        if st.session_state.get('selected_project') == 'project4':
-            st.write("Project 4 Content")
-            # ===== ADD YOUR PROJECT 4 CODE HERE =====
-            # def project4_main():
-            #     Your code here
-            # project4_main()
-
-    # Handle card clicks
-    for key in ['project1', 'project2', 'project3', 'project4']:
-        if key not in st.session_state:
-            st.session_state[key] = False
-
-    # Initialize selected_project in session state if not already present
-    if 'selected_project' not in st.session_state:
-        st.session_state['selected_project'] = None
+    # Display selected project
+    if st.session_state.current_project == "project1":
+        # ===== PROJECT 1 CODE =====
+        # Add your Project 1 code here
+        st.markdown("### Project 1")
+        # def project1_main():
+        #     Your project 1 code here
+        # project1_main()
+        
+    elif st.session_state.current_project == "project2":
+        # ===== PROJECT 2 CODE =====
+        # Add your Project 2 code here
+        st.markdown("### Project 2")
+        # def project2_main():
+        #     Your project 2 code here
+        # project2_main()
+        
+    elif st.session_state.current_project == "project3":
+        # ===== PROJECT 3 CODE =====
+        # Add your Project 3 code here
+        st.markdown("### Project 3")
+        # def project3_main():
+        #     Your project 3 code here
+        # project3_main()
+        
+    elif st.session_state.current_project == "project4":
+        # ===== PROJECT 4 CODE =====
+        # Add your Project 4 code here
+        st.markdown("### Project 4")
+        # def project4_main():
+        #     Your project 4 code here
+        # project4_main()
 
 if __name__ == "__main__":
     main()
