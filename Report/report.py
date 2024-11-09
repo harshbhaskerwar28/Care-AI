@@ -253,9 +253,24 @@ class HealthReportAnalyzer:
 
     async def process_document(self, file_content: str):
         """Process document and create vector store"""
-        chunks = self.text_splitter.split_text(file_content)
-        self.vectorstore = await FAISS.afrom_texts(chunks, self.embeddings)
-        return chunks
+        try:
+            # Split the text into chunks
+            chunks = self.text_splitter.split_text(file_content)
+            
+            if not chunks:
+                raise ValueError("No text chunks were created from the document")
+
+            # Create embeddings and FAISS index
+            self.vectorstore = await FAISS.afrom_texts(
+                texts=chunks,
+                embedding=self.embeddings,
+                normalize_L2=True  # Enable L2 normalization for better matching
+            )
+            
+            return chunks
+        except Exception as e:
+            st.error(f"Error processing document: {str(e)}")
+            raise
 
     async def analyze_report(self, report_text: str, agent_status: AgentStatus):
         """Analyze report using multiple agents with dynamic status updates"""
@@ -269,89 +284,96 @@ class HealthReportAnalyzer:
             'Processing document...'
         )
         
-        # Process document first
-        await self.process_document(report_text)
-        agent_status.update_status(
-            'document_processor',
-            'completed',
-            1.0,
-            'Document processed'
-        )
-        
-        # Process each agent sequentially
-        agents_list = list(self.agents.items())
-        for idx, (agent_name, agent) in enumerate(agents_list[1:], 1):  # Skip document_processor
-            # Update status to working
+        try:
+            # Process document first
+            await self.process_document(report_text)
             agent_status.update_status(
-                agent_name,
-                'working',
-                0.0,
-                f'Starting analysis...'
+                'document_processor',
+                'completed',
+                1.0,
+                'Document processed'
             )
             
-            start_time = time.time()
-            
-            try:
-                # Get relevant context from vectorstore
-                if self.vectorstore:
-                    relevant_docs = await self.vectorstore.asimilarity_search(
-                        agent_name,
-                        k=3
-                    )
-                    context = "\n".join(doc.page_content for doc in relevant_docs)
-                    augmented_text = f"Context: {context}\n\nReport: {report_text}"
-                else:
-                    augmented_text = report_text
-                
-                # Update status to show progress
+            # Process each agent sequentially
+            agents_list = list(self.agents.items())
+            for idx, (agent_name, agent) in enumerate(agents_list[1:], 1):  # Skip document_processor
+                # Update status to working
                 agent_status.update_status(
                     agent_name,
                     'working',
-                    0.5,
-                    'Analyzing content...'
+                    0.0,
+                    f'Starting analysis...'
                 )
                 
-                response = await agent.ainvoke({"input": augmented_text})
-                processing_time = time.time() - start_time
+                start_time = time.time()
                 
-                results[agent_name] = AgentResponse(
-                    agent_name=agent_name,
-                    content=response,
-                    confidence=0.9,
-                    processing_time=processing_time
-                )
-                
-                # Update status to completed
-                agent_status.update_status(
-                    agent_name,
-                    'completed',
-                    1.0,
-                    'Analysis complete'
-                )
-                
-            except Exception as e:
-                results[agent_name] = AgentResponse(
-                    agent_name=agent_name,
-                    content=f"Error: {str(e)}",
-                    confidence=0.0,
-                    processing_time=0.0
-                )
-                
-                # Update status to error
-                agent_status.update_status(
-                    agent_name,
-                    'error',
-                    1.0,
-                    f'Error: {str(e)}'
-                )
-        
-        return results
+                try:
+                    # Get relevant context from vectorstore
+                    if self.vectorstore is not None:
+                        relevant_docs = await self.vectorstore.asimilarity_search(
+                            agent_name,
+                            k=3
+                        )
+                        context = "\n".join(doc.page_content for doc in relevant_docs)
+                        augmented_text = f"Context: {context}\n\nReport: {report_text}"
+                    else:
+                        augmented_text = report_text
+                    
+                    # Update status to show progress
+                    agent_status.update_status(
+                        agent_name,
+                        'working',
+                        0.5,
+                        'Analyzing content...'
+                    )
+                    
+                    response = await agent.ainvoke({"input": augmented_text})
+                    processing_time = time.time() - start_time
+                    
+                    results[agent_name] = AgentResponse(
+                        agent_name=agent_name,
+                        content=response,
+                        confidence=0.9,
+                        processing_time=processing_time
+                    )
+                    
+                    # Update status to completed
+                    agent_status.update_status(
+                        agent_name,
+                        'completed',
+                        1.0,
+                        'Analysis complete'
+                    )
+                    
+                except Exception as e:
+                    results[agent_name] = AgentResponse(
+                        agent_name=agent_name,
+                        content=f"Error: {str(e)}",
+                        confidence=0.0,
+                        processing_time=0.0
+                    )
+                    
+                    # Update status to error
+                    agent_status.update_status(
+                        agent_name,
+                        'error',
+                        1.0,
+                        f'Error: {str(e)}'
+                    )
+            
+            return results
+        except Exception as e:
+            st.error(f"Error in analyze_report: {str(e)}")
+            raise
 
     async def generate_chat_response(self, query: str, context: str) -> str:
         """Generate chat response using RAG"""
         try:
-            if self.vectorstore:
-                relevant_chunks = await self.vectorstore.asimilarity_search(query, k=3)
+            if self.vectorstore is not None:
+                relevant_chunks = await self.vectorstore.asimilarity_search(
+                    query,
+                    k=3
+                )
                 additional_context = "\n".join(chunk.page_content for chunk in relevant_chunks)
                 full_context = f"{context}\n\nAdditional Context: {additional_context}"
             else:
@@ -376,6 +398,8 @@ class HealthReportAnalyzer:
             
             return response
         except Exception as e:
+            error_message = f"Error generating chat response: {str(e)}"
+            st.error(error_message)
             return f"I apologize, but I encountered an error: {str(e)}"
 
 def handle_chat_input():
