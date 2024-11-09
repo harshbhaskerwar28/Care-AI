@@ -101,27 +101,90 @@ class AgentResponse:
     confidence: float
     processing_time: float
 
-def display_workflow():
-    """Display the analysis workflow with updated styling"""
-    with st.container():
-        st.markdown("""
-            <div class="workflow-container">
-                <h3>How It Works</h3>
-                <div class="workflow-step">
-                    1. Upload Your Health Report (PDF/TXT)
+class AgentStatus:
+    """Enhanced agent status management with sidebar display"""
+    def __init__(self):
+        self.sidebar_placeholder = None
+        self.agents = {
+            'document_processor': {'status': 'idle', 'progress': 0, 'message': ''},
+            'positive_analyzer': {'status': 'idle', 'progress': 0, 'message': ''},
+            'negative_analyzer': {'status': 'idle', 'progress': 0, 'message': ''},
+            'summary_agent': {'status': 'idle', 'progress': 0, 'message': ''},
+            'recommendation_agent': {'status': 'idle', 'progress': 0, 'message': ''},
+            'chat_assistant': {'status': 'idle', 'progress': 0, 'message': ''}  # Added chat assistant
+        }
+        
+    def initialize_sidebar_placeholder(self):
+        """Initialize the sidebar placeholder"""
+        with st.sidebar:
+            st.markdown("## 🤖 Agent Status")
+            self.sidebar_placeholder = st.empty()
+    
+    def update_status(self, agent_name: str, status: str, progress: float, message: str = ""):
+        """Update agent status and refresh sidebar display"""
+        self.agents[agent_name] = {
+            'status': status,
+            'progress': progress,
+            'message': message
+        }
+        self._render_status()
+
+    def _render_status(self):
+        """Render status in sidebar"""
+        if self.sidebar_placeholder is None:
+            self.initialize_sidebar_placeholder()
+            
+        with self.sidebar_placeholder.container():
+            for agent_name, status in self.agents.items():
+                self._render_agent_card(agent_name, status)
+
+    def _render_agent_card(self, agent_name: str, status: dict):
+        """Render individual agent status card in sidebar"""
+        colors = {
+            'idle': '#6c757d',
+            'working': '#007bff',
+            'completed': '#28a745',
+            'error': '#dc3545'
+        }
+        color = colors.get(status['status'], colors['idle'])
+        
+        # Add robot emoji to agent name
+        display_name = f"{agent_name.replace('_', ' ').title()}"
+        
+        st.markdown(f"""
+            <div style="
+                background-color: #1E1E1E;
+                padding: 0.8rem;
+                border-radius: 0.5rem;
+                margin-bottom: 0.8rem;
+                border: 1px solid {color};
+            ">
+                <div style="color: {color}; font-weight: bold;">
+                    {display_name}
                 </div>
-                <div class="workflow-step">
-                    2. AI Agents Analyze Your Report
+                <div style="
+                    color: #CCCCCC;
+                    font-size: 0.8rem;
+                    margin: 0.3rem 0;
+                ">
+                    {status['message'] or status['status'].title()}
                 </div>
-                <div class="workflow-step">
-                    3. Get Comprehensive Analysis & Insights
-                </div>
-                <div class="workflow-step">
-                    4. Chat with AI About Your Results
+                <div style="
+                    height: 4px;
+                    background-color: rgba(255,255,255,0.1);
+                    border-radius: 2px;
+                    margin-top: 0.5rem;
+                ">
+                    <div style="
+                        width: {status['progress'] * 100}%;
+                        height: 100%;
+                        background-color: {color};
+                        border-radius: 2px;
+                        transition: width 0.3s ease;
+                    "></div>
                 </div>
             </div>
         """, unsafe_allow_html=True)
-
 
 class HealthReportAnalyzer:
     """Enhanced health report analysis system with specialized agents"""
@@ -194,20 +257,38 @@ class HealthReportAnalyzer:
         self.vectorstore = await FAISS.afrom_texts(chunks, self.embeddings)
         return chunks
 
-    async def analyze_report(self, report_text: str):
-        """Analyze report using multiple agents"""
+    async def analyze_report(self, report_text: str, agent_status: AgentStatus):
+        """Analyze report using multiple agents with dynamic status updates"""
         results = {}
+        
+        # Update document processor status
+        agent_status.update_status(
+            'document_processor',
+            'working',
+            0.0,
+            'Processing document...'
+        )
         
         # Process document first
         await self.process_document(report_text)
+        agent_status.update_status(
+            'document_processor',
+            'completed',
+            1.0,
+            'Document processed'
+        )
         
-        # Create progress bar
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        total_agents = len(self.agents)
-        for idx, (agent_name, agent) in enumerate(self.agents.items(), 1):
-            status_text.text(f"Running {agent_name.replace('_', ' ').title()}...")
+        # Process each agent sequentially
+        agents_list = list(self.agents.items())
+        for idx, (agent_name, agent) in enumerate(agents_list[1:], 1):  # Skip document_processor
+            # Update status to working
+            agent_status.update_status(
+                agent_name,
+                'working',
+                0.0,
+                f'Starting analysis...'
+            )
+            
             start_time = time.time()
             
             try:
@@ -222,6 +303,14 @@ class HealthReportAnalyzer:
                 else:
                     augmented_text = report_text
                 
+                # Update status to show progress
+                agent_status.update_status(
+                    agent_name,
+                    'working',
+                    0.5,
+                    'Analyzing content...'
+                )
+                
                 response = await agent.ainvoke({"input": augmented_text})
                 processing_time = time.time() - start_time
                 
@@ -232,6 +321,14 @@ class HealthReportAnalyzer:
                     processing_time=processing_time
                 )
                 
+                # Update status to completed
+                agent_status.update_status(
+                    agent_name,
+                    'completed',
+                    1.0,
+                    'Analysis complete'
+                )
+                
             except Exception as e:
                 results[agent_name] = AgentResponse(
                     agent_name=agent_name,
@@ -239,12 +336,15 @@ class HealthReportAnalyzer:
                     confidence=0.0,
                     processing_time=0.0
                 )
-            
-            # Update progress
-            progress_bar.progress(idx / total_agents)
+                
+                # Update status to error
+                agent_status.update_status(
+                    agent_name,
+                    'error',
+                    1.0,
+                    f'Error: {str(e)}'
+                )
         
-        status_text.text("Analysis complete!")
-        progress_bar.empty()
         return results
 
     async def generate_chat_response(self, query: str, context: str) -> str:
@@ -278,92 +378,11 @@ class HealthReportAnalyzer:
         except Exception as e:
             return f"I apologize, but I encountered an error: {str(e)}"
 
-class AgentStatus:
-    """Enhanced agent status management with sidebar display"""
-    def __init__(self):
-        self.sidebar_placeholder = None
-        self.agents = {
-            'document_processor': {'status': 'idle', 'progress': 0, 'message': ''},
-            'positive_analyzer': {'status': 'idle', 'progress': 0, 'message': ''},
-            'negative_analyzer': {'status': 'idle', 'progress': 0, 'message': ''},
-            'summary_agent': {'status': 'idle', 'progress': 0, 'message': ''},
-            'recommendation_agent': {'status': 'idle', 'progress': 0, 'message': ''}
-        }
-        
-    def initialize_sidebar_placeholder(self):
-        """Initialize the sidebar placeholder"""
-        with st.sidebar:
-            self.sidebar_placeholder = st.empty()
-    
-    def update_status(self, agent_name: str, status: str, progress: float, message: str = ""):
-        """Update agent status and refresh sidebar display"""
-        self.agents[agent_name] = {
-            'status': status,
-            'progress': progress,
-            'message': message
-        }
-        self._render_status()
-
-    def _render_status(self):
-        """Render status in sidebar"""
-        if self.sidebar_placeholder is None:
-            self.initialize_sidebar_placeholder()
-            
-        with self.sidebar_placeholder.container():
-            for agent_name, status in self.agents.items():
-                self._render_agent_card(agent_name, status)
-
-    def _render_agent_card(self, agent_name: str, status: dict):
-        """Render individual agent status card in sidebar"""
-        colors = {
-            'idle': '#6c757d',
-            'working': '#007bff',
-            'completed': '#28a745',
-            'error': '#dc3545'
-        }
-        color = colors.get(status['status'], colors['idle'])
-        
-        st.markdown(f"""
-            <div style="
-                background-color: #1E1E1E;
-                padding: 0.8rem;
-                border-radius: 0.5rem;
-                margin-bottom: 0.8rem;
-                border: 1px solid {color};
-            ">
-                <div style="color: {color}; font-weight: bold;">
-                    {agent_name.replace('_', ' ').title()}
-                </div>
-                <div style="
-                    color: #CCCCCC;
-                    font-size: 0.8rem;
-                    margin: 0.3rem 0;
-                ">
-                    {status['message'] or status['status'].title()}
-                </div>
-                <div style="
-                    height: 4px;
-                    background-color: rgba(255,255,255,0.1);
-                    border-radius: 2px;
-                    margin-top: 0.5rem;
-                ">
-                    <div style="
-                        width: {status['progress'] * 100}%;
-                        height: 100%;
-                        background-color: {color};
-                        border-radius: 2px;
-                        transition: width 0.3s ease;
-                    "></div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-
 def handle_chat_input():
-    """Handle chat input and response with improved styling and auto-clear functionality"""
+    """Handle chat input and response"""
     if "chat_messages" not in st.session_state:
         st.session_state.chat_messages = []
     
-    # Initialize key for input field
     if "chat_input_key" not in st.session_state:
         st.session_state.chat_input_key = 0
     
@@ -385,7 +404,7 @@ def handle_chat_input():
                 </div>
             """, unsafe_allow_html=True)
     
-    # Chat input area with button
+    # Chat input area
     col1, col2 = st.columns([4, 1])
     with col1:
         user_input = st.text_input(
@@ -395,32 +414,63 @@ def handle_chat_input():
     with col2:
         send_button = st.button("Send")
     
-    # Handle new message
     if send_button and user_input and not st.session_state.processing_message:
         st.session_state.processing_message = True
         
-        # Add user message
+        # Update chat assistant status
+        st.session_state.agent_status.update_status(
+            'chat_assistant',
+            'working',
+            0.5,
+            'Processing your question...'
+        )
+        
         human_message = HumanMessage(content=user_input)
         st.session_state.chat_messages.append(human_message)
         
         if st.session_state.report_text:
-            with st.spinner("Processing your question..."):
-                # Get AI response
-                response = asyncio.run(
-                    st.session_state.analyzer.generate_chat_response(
-                        user_input,
-                        st.session_state.report_text
-                    )
+            response = asyncio.run(
+                st.session_state.analyzer.generate_chat_response(
+                    user_input,
+                    st.session_state.report_text
                 )
-                
-                # Add AI response
-                ai_message = AIMessage(content=response)
-                st.session_state.chat_messages.append(ai_message)
+            )
+            
+            ai_message = AIMessage(content=response)
+            st.session_state.chat_messages.append(ai_message)
         
-        # Reset processing flag and increment input key to clear the field
+        # Update chat assistant status to completed
+        st.session_state.agent_status.update_status(
+            'chat_assistant',
+            'completed',
+            1.0,
+            'Response generated'
+        )
+        
         st.session_state.processing_message = False
         st.session_state.chat_input_key += 1
         st.rerun()
+        
+def display_workflow():
+    """Display the analysis workflow"""
+    with st.container():
+        st.markdown("""
+            <div class="workflow-container">
+                <h3>How It Works</h3>
+                <div class="workflow-step">
+                    1. Upload Your Health Report (PDF/TXT)
+                </div>
+                <div class="workflow-step">
+                    2. AI Agents Analyze Your Report
+                </div>
+                <div class="workflow-step">
+                    3. Get Comprehensive Analysis & Insights
+                </div>
+                <div class="workflow-step">
+                    4. Chat with AI About Your Results
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
 
 def main():
     """Main application with enhanced UI and dark theme"""
@@ -431,11 +481,7 @@ def main():
         st.session_state.report_results = None
     if 'report_text' not in st.session_state:
         st.session_state.report_text = None
-    if 'processing_agent' not in st.session_state:
-        st.session_state.processing_agent = None
-    if 'completed_agents' not in st.session_state:
-        st.session_state.completed_agents = set()
-    if "agent_status" not in st.session_state:
+    if 'agent_status' not in st.session_state:
         st.session_state.agent_status = AgentStatus()
     
     # Sidebar
@@ -463,33 +509,37 @@ def main():
                         text = uploaded_file.getvalue().decode()
                     
                     st.session_state.report_text = text
-                    st.session_state.processing_agent = None
-                    st.session_state.completed_agents = set()
                     
-                    # Analyze report with progress tracking
+                    # Initialize agent status display after file upload
+                    st.session_state.agent_status.initialize_sidebar_placeholder()
+                    
+                    # Reset all agent statuses to idle
+                    for agent_name in st.session_state.agent_status.agents:
+                        st.session_state.agent_status.update_status(
+                            agent_name,
+                            'idle',
+                            0.0,
+                            'Waiting to start...'
+                        )
+                    
+                    # Analyze report with dynamic status updates
                     st.session_state.report_results = asyncio.run(
-                        st.session_state.analyzer.analyze_report(text)
+                        st.session_state.analyzer.analyze_report(
+                            text,
+                            st.session_state.agent_status
+                        )
                     )
                     
-                    st.success("Analysis complete!")
                     st.rerun()
                     
                 except Exception as e:
                     st.error(f"Error processing report: {str(e)}")
         
+        # Display agent status after file upload section
+        if st.session_state.report_text:
+            st.session_state.agent_status.initialize_sidebar_placeholder()
     
-    # Initialize the status display
-    st.session_state.agent_status.initialize_sidebar_placeholder()
-
-    # Update status (use this whenever you need to update an agent's status)
-    st.session_state.agent_status.update_status(
-        agent_name='positive_analyzer',  # or whatever agent
-        status='working',  # 'idle', 'working', 'completed', or 'error'
-        progress=0.5,  # progress from 0 to 1
-        message='Processing data...'  # status message
-    )
-    
-    # Main content area
+        # Main content area
     st.title("Health Report Analysis")
     
     if not st.session_state.report_results:
