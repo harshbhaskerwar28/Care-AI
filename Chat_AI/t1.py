@@ -325,241 +325,242 @@ def _initialize_agents(self):
             for name, prompt in self.prompts.items()
         }
 
-    def _format_chat_history(self) -> str:
-        """Format chat history for context"""
-        formatted = []
-        for msg in self.chat_history[-5:]:  # Last 5 messages
-            role = "User" if isinstance(msg, HumanMessage) else "Assistant"
-            formatted.append(f"{role}: {msg.content}")
-        return "\n".join(formatted)
+def _format_chat_history(self) -> str:
+    """Format chat history for context"""
+    formatted = []
+    for msg in self.chat_history[-5:]:  # Last 5 messages
+        role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+        formatted.append(f"{role}: {msg.content}")
+    return "\n".join(formatted)
 
-    async def process_documents(self, files, status_callback) -> bool:
-        """Process documents with detailed status updates"""
-        try:
-            processed_docs = []
-            
-            for idx, file in enumerate(files):
-                doc = await self.doc_processor.process_file(
-                    file,
-                    lambda p, m: status_callback(
-                        'document_processor',
-                        'working',
-                        (idx / len(files)) + (p / len(files)),
-                        m
-                    )
-                )
-                if doc:
-                    processed_docs.append(doc)
-
-            if processed_docs:
-                success = await self.doc_processor.update_vector_store(
-                    processed_docs,
-                    lambda p, m: status_callback(
-                        'document_processor',
-                        'working',
-                        0.8 + (p * 0.2),
-                        m
-                    )
-                )
-                
-                if success:
-                    status_callback(
-                        'document_processor',
-                        'completed',
-                        1.0,
-                        "Documents processed successfully"
-                    )
-                    return True
-
-            status_callback(
-                'document_processor',
-                'error',
-                0,
-                "Document processing failed"
-            )
-            return False
-            
-        except Exception as e:
-            status_callback(
-                'document_processor',
-                'error',
-                0,
-                str(e)
-            )
-            return False
-
-    async def get_relevant_context(self, query: str) -> str:
-        """Get relevant context from vector store"""
-        try:
-            if self.doc_processor.vector_store:
-                docs = self.doc_processor.vector_store.similarity_search(
-                    query,
-                    k=3
-                )
-                return "\n\n".join(doc.page_content for doc in docs)
-        except Exception as e:
-            st.error(f"Error retrieving context: {str(e)}")
-        return ""
-
-    async def process_query(
-        self,
-        query: str,
-        status_callback
-    ) -> Dict[str, AgentResponse]:
-        """Process query through multi-agent system"""
-        responses = {}
-        context = await self.get_relevant_context(query)
-        chat_history = self._format_chat_history()
+async def process_documents(self, files, status_callback) -> bool:
+    """Process documents with detailed status updates"""
+    try:
+        processed_docs = []
         
-        try:
-            # Process through main agent
-            status_callback('main_agent', 'working', 0.2, "Analyzing query")
-            main_response = await self._get_agent_response(
-                'main_agent',
-                query,
-                context,
-                chat_history
+        for idx, file in enumerate(files):
+            doc = await self.doc_processor.process_file(
+                file,
+                lambda p, m: status_callback(
+                    'document_processor',
+                    'working',
+                    (idx / len(files)) + (p / len(files)),
+                    m
+                )
             )
-            responses['main_agent'] = main_response
-            status_callback('main_agent', 'completed', 1.0, "Analysis complete")
+            if doc:
+                processed_docs.append(doc)
 
-            # Process through specialist agents in parallel
-            status_callback('diagnosis_agent', 'working', 0.2, "Analyzing symptoms")
-            status_callback('treatment_agent', 'working', 0.2, "Evaluating treatments")
-            status_callback('research_agent', 'working', 0.2, "Reviewing research")
-
-            specialist_tasks = [
-                self._get_agent_response('diagnosis_agent', query, context, chat_history),
-                self._get_agent_response('treatment_agent', query, context, chat_history),
-                self._get_agent_response('research_agent', query, context, chat_history)
-            ]
-
-            specialist_responses = await asyncio.gather(*specialist_tasks)
+        if processed_docs:
+            success = await self.doc_processor.update_vector_store(
+                processed_docs,
+                lambda p, m: status_callback(
+                    'document_processor',
+                    'working',
+                    0.8 + (p * 0.2),
+                    m
+                )
+            )
             
-            # Update responses and status for each specialist agent
-            for agent_name, response in zip(
-                ['diagnosis_agent', 'treatment_agent', 'research_agent'],
-                specialist_responses
-            ):
-                responses[agent_name] = response
+            if success:
                 status_callback(
-                    agent_name,
+                    'document_processor',
                     'completed',
                     1.0,
-                    f"{agent_name.split('_')[0].title()} analysis complete"
+                    "Documents processed successfully"
                 )
+                return True
 
-            # Synthesize final response
-            status_callback('synthesis_agent', 'working', 0.5, "Synthesizing insights")
-            final_response = await self._synthesize_responses(
+        status_callback(
+            'document_processor',
+            'error',
+            0,
+            "Document processing failed"
+        )
+        return False
+        
+    except Exception as e:
+        status_callback(
+            'document_processor',
+            'error',
+            0,
+            str(e)
+        )
+        return False
+
+async def get_relevant_context(self, query: str) -> str:
+    """Get relevant context from vector store"""
+    try:
+        if self.doc_processor.vector_store:
+            docs = self.doc_processor.vector_store.similarity_search(
                 query,
-                context,
-                chat_history,
-                responses
+                k=3
             )
-            responses['synthesis_agent'] = final_response
+            return "\n\n".join(doc.page_content for doc in docs)
+    except Exception as e:
+        st.error(f"Error retrieving context: {str(e)}")
+    return ""
+
+async def process_query(
+    self,
+    query: str,
+    status_callback
+) -> Dict[str, AgentResponse]:
+    """Process query through multi-agent system"""
+    responses = {}
+    context = await self.get_relevant_context(query)
+    chat_history = self._format_chat_history()
+    
+    try:
+        # Process through main agent
+        status_callback('main_agent', 'working', 0.2, "Analyzing query")
+        main_response = await self._get_agent_response(
+            'main_agent',
+            query,
+            context,
+            chat_history
+        )
+        responses['main_agent'] = main_response
+        status_callback('main_agent', 'completed', 1.0, "Analysis complete")
+
+        # Process through specialist agents in parallel
+        status_callback('diagnosis_agent', 'working', 0.2, "Analyzing symptoms")
+        status_callback('treatment_agent', 'working', 0.2, "Evaluating treatments")
+        status_callback('research_agent', 'working', 0.2, "Reviewing research")
+
+        specialist_tasks = [
+            self._get_agent_response('diagnosis_agent', query, context, chat_history),
+            self._get_agent_response('treatment_agent', query, context, chat_history),
+            self._get_agent_response('research_agent', query, context, chat_history)
+        ]
+
+        specialist_responses = await asyncio.gather(*specialist_tasks)
+        
+        # Update responses and status for each specialist agent
+        for agent_name, response in zip(
+            ['diagnosis_agent', 'treatment_agent', 'research_agent'],
+            specialist_responses
+        ):
+            responses[agent_name] = response
             status_callback(
-                'synthesis_agent',
+                agent_name,
                 'completed',
                 1.0,
-                "Response synthesis complete"
+                f"{agent_name.split('_')[0].title()} analysis complete"
             )
 
-            # Update chat history
-            self.chat_history.extend([
-                HumanMessage(content=query),
-                AIMessage(content=final_response.content)
-            ])
+        # Synthesize final response
+        status_callback('synthesis_agent', 'working', 0.5, "Synthesizing insights")
+        final_response = await self._synthesize_responses(
+            query,
+            context,
+            chat_history,
+            responses
+        )
+        responses['synthesis_agent'] = final_response
+        status_callback(
+            'synthesis_agent',
+            'completed',
+            1.0,
+            "Response synthesis complete"
+        )
 
-            return responses
+        # Update chat history
+        self.chat_history.extend([
+            HumanMessage(content=query),
+            AIMessage(content=final_response.content)
+        ])
 
-        except Exception as e:
-            # Update status for all agents to error state
-            for agent in self.agents.keys():
-                status_callback(agent, 'error', 0, str(e))
-            raise Exception(f"Query processing error: {str(e)}")
+        return responses
 
-    async def _get_agent_response(
-        self,
-        agent_name: str,
-        query: str,
-        context: str,
-        chat_history: str
-    ) -> AgentResponse:
-        """Get response from specific agent with metadata"""
+    except Exception as e:
+        # Update status for all agents to error state
+        for agent in self.agents.keys():
+            status_callback(agent, 'error', 0, str(e))
+        raise Exception(f"Query processing error: {str(e)}")
+
+async def _get_agent_response(
+    self,
+    agent_name: str,
+    query: str,
+    context: str,
+    chat_history: str
+) -> AgentResponse:
+    """Get response from specific agent with metadata"""
+    start_time = time.time()
+    
+    try:
+        response = await self.agents[agent_name].ainvoke({
+            "input": query,
+            "context": context,
+            "query": query,
+            "chat_history": chat_history
+        })
+        
+        processing_time = time.time() - start_time
+        
+        metadata = {
+            "processing_time": processing_time,
+            "context_length": len(context),
+            "query_length": len(query)
+        }
+        
+        return AgentResponse(
+            agent_name=agent_name,
+            content=response,
+            confidence=0.85,  # You could implement confidence scoring
+            metadata=metadata,
+            processing_time=processing_time
+        )
+        
+    except Exception as e:
+        raise Exception(f"Agent {agent_name} error: {str(e)}")
+
+async def _synthesize_responses(
+    self,
+    query: str,
+    context: str,
+    chat_history: str,
+    responses: Dict[str, AgentResponse]
+) -> AgentResponse:
+    """Synthesize final response from all agent responses"""
+    try:
+        # Format agent responses for synthesis
+        formatted_responses = "\n\n".join([
+            f"{name.upper()}:\n{response.content}"
+            for name, response in responses.items()
+            if name != 'synthesis_agent'
+        ])
+
         start_time = time.time()
         
-        try:
-            response = await self.agents[agent_name].ainvoke({
-                "input": query,
-                "context": context,
-                "query": query,
-                "chat_history": chat_history
-            })
-            
-            processing_time = time.time() - start_time
-            
-            metadata = {
-                "processing_time": processing_time,
-                "context_length": len(context),
-                "query_length": len(query)
-            }
-            
-            return AgentResponse(
-                agent_name=agent_name,
-                content=response,
-                confidence=0.85,  # You could implement confidence scoring
-                metadata=metadata,
-                processing_time=processing_time
-            )
-            
-        except Exception as e:
-            raise Exception(f"Agent {agent_name} error: {str(e)}")
+        synthesis_response = await self.agents['synthesis_agent'].ainvoke({
+            "input": query,
+            "context": context,
+            "query": query,
+            "chat_history": chat_history,
+            "agent_responses": formatted_responses
+        })
+        
+        processing_time = time.time() - start_time
+        
+        metadata = {
+            "processing_time": processing_time,
+            "source_responses": len(responses),
+            "context_used": bool(context)
+        }
+        
+        return AgentResponse(
+            agent_name="synthesis_agent",
+            content=synthesis_response,
+            confidence=0.9,
+            metadata=metadata,
+            processing_time=processing_time
+        )
 
-    async def _synthesize_responses(
-        self,
-        query: str,
-        context: str,
-        chat_history: str,
-        responses: Dict[str, AgentResponse]
-    ) -> AgentResponse:
-        """Synthesize final response from all agent responses"""
-        try:
-            # Format agent responses for synthesis
-            formatted_responses = "\n\n".join([
-                f"{name.upper()}:\n{response.content}"
-                for name, response in responses.items()
-                if name != 'synthesis_agent'
-            ])
-
-            start_time = time.time()
-            
-            synthesis_response = await self.agents['synthesis_agent'].ainvoke({
-                "input": query,
-                "context": context,
-                "query": query,
-                "chat_history": chat_history,
-                "agent_responses": formatted_responses
-            })
-            
-            processing_time = time.time() - start_time
-            
-            metadata = {
-                "processing_time": processing_time,
-                "source_responses": len(responses),
-                "context_used": bool(context)
-            }
-            
-            return AgentResponse(
-                agent_name="synthesis_agent",
-                content=synthesis_response,
-                confidence=0.9,
-                metadata=metadata,
-                processing_time=processing_time
-            )
-
-        except Exception as e:
-            raise Exception(f"Synthesis error: {str(e)}")
+    except Exception as e:
+        raise Exception(f"Synthesis error: {str(e)}")
+    
 def setup_streamlit_ui():
     """Setup Streamlit UI with dark sidebar"""
     st.set_page_config(
