@@ -191,7 +191,7 @@ class HealthReportAnalyzer:
     def __init__(self):
         self.llm = ChatGroq(
             temperature=0.3,
-            model_name="llama-3.2-1b-preview",
+            model_name="llama3-8b-8192",
             groq_api_key=os.getenv("GROQ_API_KEY")
         )
         self.embeddings = GoogleGenerativeAIEmbeddings(
