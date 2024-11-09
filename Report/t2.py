@@ -17,6 +17,7 @@ import time
 
 load_dotenv()
 
+# Configure Streamlit theme
 st.set_page_config(
     page_title="Health Report Analyzer",
     page_icon="🏥",
@@ -24,6 +25,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# [Previous CSS styling remains the same...]
 st.markdown("""
     <style>
         .stApp {
@@ -62,35 +64,6 @@ st.markdown("""
             border-left: 5px solid #0078FF;
         }
         
-        .agent-status {
-            background-color: #1E1E1E;
-            padding: 12px;
-            border-radius: 8px;
-            margin: 8px 0;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .agent-status.idle {
-            border-left: 4px solid #808080;
-        }
-        
-        .agent-status.processing {
-            border-left: 4px solid #FFA500;
-            animation: pulse 2s infinite;
-        }
-        
-        .agent-status.complete {
-            border-left: 4px solid #00CA51;
-        }
-        
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.6; }
-            100% { opacity: 1; }
-        }
-        
         .stTabs [data-baseweb="tab-list"] {
             gap: 8px;
         }
@@ -109,20 +82,6 @@ st.markdown("""
         .stProgress > div > div {
             background-color: #00CA51;
         }
-        
-        .loading-spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255,255,255,.3);
-            border-radius: 50%;
-            border-top-color: #fff;
-            animation: spin 1s ease-in-out infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -133,10 +92,6 @@ class AgentResponse:
     content: str
     confidence: float
     processing_time: float
-
-class HealthReportAnalyzer:
-    # Your existing HealthReportAnalyzer implementation here
-    pass
 
 def display_workflow():
     """Display the analysis workflow with updated styling"""
@@ -160,63 +115,67 @@ def display_workflow():
         """, unsafe_allow_html=True)
 
 def display_agent_status():
-    """Display agent status in sidebar with improved styling and loading indicators"""
+    """Display agent status in sidebar with improved styling"""
     st.sidebar.markdown("### 🤖 Agent Status")
     
-    agents = {
-        'Document Processor': '📄',
-        'Positive Analyzer': '✨',
-        'Risk Assessor': '⚠️',
-        'Summary Generator': '📝',
-        'Recommendation Engine': '💡'
-    }
+    agents = ['Document Processor', 'Positive Analyzer', 'Risk Assessor', 
+              'Summary Generator', 'Recommendation Engine']
     
-    for agent_name, icon in agents.items():
-        status_class = "idle"
-        status_text = "Idle"
-        loading_spinner = ""
-        
+    for agent in agents:
+        status = "🔴 Idle"  # Default status
         if hasattr(st.session_state, 'processing_agent'):
-            if st.session_state.processing_agent == agent_name:
-                status_class = "processing"
-                status_text = "Processing"
-                loading_spinner = '<div class="loading-spinner"></div>'
-            elif agent_name in st.session_state.completed_agents:
-                status_class = "complete"
-                status_text = "Complete"
+            if st.session_state.processing_agent == agent:
+                status = "🟡 Processing"
+            elif agent in st.session_state.completed_agents:
+                status = "🟢 Complete"
         
-        st.sidebar.markdown(f"""
-            <div class="agent-status {status_class}">
-                <div>{icon} {agent_name}</div>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    {status_text}
-                    {loading_spinner}
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
+        st.sidebar.markdown(f"{agent}: {status}")
 
 def handle_chat_input():
-    """Handle chat input and response with improved flow control"""
-    if "chat_input" not in st.session_state:
-        st.session_state.chat_input = ""
+    """Handle chat input and response with improved styling and fixed infinite loop"""
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
+    
+    if "user_input" not in st.session_state:
+        st.session_state.user_input = ""
+    
     if "processing_message" not in st.session_state:
         st.session_state.processing_message = False
     
+    # Display existing chat messages
+    for message in st.session_state.chat_messages:
+        if isinstance(message, HumanMessage):
+            st.markdown(f"""
+                <div class="chat-message user-message">
+                    <strong>You:</strong> {message.content}
+                </div>
+            """, unsafe_allow_html=True)
+        elif isinstance(message, AIMessage):
+            st.markdown(f"""
+                <div class="chat-message assistant-message">
+                    <strong>Assistant:</strong> {message.content}
+                </div>
+            """, unsafe_allow_html=True)
+    
+    # Chat input area with button
     col1, col2 = st.columns([4, 1])
     with col1:
         user_input = st.text_input("Ask a question about your report:", 
-                                  key="chat_input_field",
-                                  disabled=st.session_state.processing_message)
+                                  key="chat_input_field")
     with col2:
-        send_button = st.button("Send", disabled=st.session_state.processing_message)
+        send_button = st.button("Send")
     
+    # Handle new message
     if send_button and user_input and not st.session_state.processing_message:
         st.session_state.processing_message = True
         
+        # Add user message
+        human_message = HumanMessage(content=user_input)
+        st.session_state.chat_messages.append(human_message)
+        
         if st.session_state.report_text:
             with st.spinner("Processing your question..."):
-                st.session_state.chat_history.append(HumanMessage(content=user_input))
-                
+                # Get AI response
                 response = asyncio.run(
                     st.session_state.analyzer.generate_chat_response(
                         user_input,
@@ -224,21 +183,22 @@ def handle_chat_input():
                     )
                 )
                 
-                st.session_state.chat_history.append(AIMessage(content=response))
-                
-                st.session_state.chat_input = ""
-                st.session_state.processing_message = False
-                st.rerun()
+                # Add AI response
+                ai_message = AIMessage(content=response)
+                st.session_state.chat_messages.append(ai_message)
+        
+        # Reset processing flag and clear input
+        st.session_state.processing_message = False
+        st.session_state.user_input = ""
+        st.rerun()
 
 def main():
-    """Main application with enhanced UI and fixed chat loop"""
+    """Main application with enhanced UI and dark theme"""
     # Initialize session state
     if 'analyzer' not in st.session_state:
         st.session_state.analyzer = HealthReportAnalyzer()
     if 'report_results' not in st.session_state:
         st.session_state.report_results = None
-    if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []
     if 'report_text' not in st.session_state:
         st.session_state.report_text = None
     if 'processing_agent' not in st.session_state:
@@ -251,42 +211,41 @@ def main():
         st.title("🏥 Health Report Analyzer")
         st.markdown("---")
         
+        # File upload in sidebar
         uploaded_file = st.file_uploader(
             "Upload your health report",
             type=['pdf', 'txt'],
             key='file_uploader'
         )
         
-        analyze_button = st.button(
-            "🔍 Analyze Report",
-            key='analyze_btn',
-            disabled=st.session_state.processing_agent is not None
-        )
+        if uploaded_file:
+            if st.button("🔍 Analyze Report", key='analyze_btn'):
+                try:
+                    # Read document
+                    if uploaded_file.type == "application/pdf":
+                        pdf_reader = PdfReader(uploaded_file)
+                        text = ""
+                        for page in pdf_reader.pages:
+                            text += page.extract_text()
+                    else:
+                        text = uploaded_file.getvalue().decode()
+                    
+                    st.session_state.report_text = text
+                    st.session_state.processing_agent = None
+                    st.session_state.completed_agents = set()
+                    
+                    # Analyze report with progress tracking
+                    st.session_state.report_results = asyncio.run(
+                        st.session_state.analyzer.analyze_report(text)
+                    )
+                    
+                    st.success("Analysis complete!")
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"Error processing report: {str(e)}")
         
-        if uploaded_file and analyze_button:
-            try:
-                if uploaded_file.type == "application/pdf":
-                    pdf_reader = PdfReader(uploaded_file)
-                    text = ""
-                    for page in pdf_reader.pages:
-                        text += page.extract_text()
-                else:
-                    text = uploaded_file.getvalue().decode()
-                
-                st.session_state.report_text = text
-                st.session_state.processing_agent = None
-                st.session_state.completed_agents = set()
-                
-                st.session_state.report_results = asyncio.run(
-                    st.session_state.analyzer.analyze_report(text)
-                )
-                
-                st.success("Analysis complete!")
-                st.rerun()
-                
-            except Exception as e:
-                st.error(f"Error processing report: {str(e)}")
-        
+        # Display agent status
         display_agent_status()
     
     # Main content area
@@ -295,6 +254,7 @@ def main():
     if not st.session_state.report_results:
         display_workflow()
     else:
+        # Navigation tabs
         tab1, tab2, tab3, tab4 = st.tabs([
             "✅ Positive Findings",
             "⚠️ Areas of Concern",
@@ -326,20 +286,6 @@ def main():
                 st.markdown(st.session_state.report_results['recommendation_agent'].content)
         
         with tab4:
-            for message in st.session_state.chat_history:
-                if isinstance(message, HumanMessage):
-                    st.markdown(f"""
-                        <div class="chat-message user-message">
-                            <strong>You:</strong> {message.content}
-                        </div>
-                    """, unsafe_allow_html=True)
-                elif isinstance(message, AIMessage):
-                    st.markdown(f"""
-                        <div class="chat-message assistant-message">
-                            <strong>Assistant:</strong> {message.content}
-                        </div>
-                    """, unsafe_allow_html=True)
-            
             handle_chat_input()
 
 if __name__ == "__main__":
