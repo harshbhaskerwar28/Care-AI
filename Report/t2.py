@@ -25,7 +25,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# [Previous CSS styling remains the same...]
+# CSS styling
 st.markdown("""
     <style>
         .stApp {
@@ -132,12 +132,13 @@ def display_agent_status():
         st.sidebar.markdown(f"{agent}: {status}")
 
 def handle_chat_input():
-    """Handle chat input and response with improved styling and fixed infinite loop"""
+    """Handle chat input and response with improved styling and auto-clear functionality"""
     if "chat_messages" not in st.session_state:
         st.session_state.chat_messages = []
     
-    if "user_input" not in st.session_state:
-        st.session_state.user_input = ""
+    # Initialize key for input field
+    if "chat_input_key" not in st.session_state:
+        st.session_state.chat_input_key = 0
     
     if "processing_message" not in st.session_state:
         st.session_state.processing_message = False
@@ -160,8 +161,10 @@ def handle_chat_input():
     # Chat input area with button
     col1, col2 = st.columns([4, 1])
     with col1:
-        user_input = st.text_input("Ask a question about your report:", 
-                                  key="chat_input_field")
+        user_input = st.text_input(
+            "Ask a question about your report:",
+            key=f"chat_input_{st.session_state.chat_input_key}"
+        )
     with col2:
         send_button = st.button("Send")
     
@@ -187,9 +190,9 @@ def handle_chat_input():
                 ai_message = AIMessage(content=response)
                 st.session_state.chat_messages.append(ai_message)
         
-        # Reset processing flag and clear input
+        # Reset processing flag and increment input key to clear the field
         st.session_state.processing_message = False
-        st.session_state.user_input = ""
+        st.session_state.chat_input_key += 1
         st.rerun()
 
 def main():
