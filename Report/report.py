@@ -122,6 +122,162 @@ def display_workflow():
             </div>
         """, unsafe_allow_html=True)
 
+
+class HealthReportAnalyzer:
+    """Enhanced health report analysis system with specialized agents"""
+    def __init__(self):
+        self.llm = ChatGroq(
+            temperature=0.3,
+            model_name="llama-3.2-1b-preview",
+            groq_api_key=os.getenv("GROQ_API_KEY")
+        )
+        self.embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/embedding-001",
+            google_api_key=os.getenv("GOOGLE_API_KEY")
+        )
+        self.text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200
+        )
+        self.vectorstore = None
+        self._initialize_agents()
+
+    def _initialize_agents(self):
+        """Initialize specialized medical analysis agents"""
+        self.agents = {
+            'document_processor': self._create_agent("""
+                You are a medical document processor specialized in health reports.
+                Extract all relevant medical information, organize it clearly, and maintain accuracy.
+                Focus on blood work, vital signs, and other measurable health metrics.
+            """),
+            
+            'positive_analyzer': self._create_agent("""
+                You are a positive health findings specialist.
+                Identify and explain all positive health indicators in the report.
+                Format your response as clear bullet points starting with "✓".
+                Include the significance of each positive finding.
+            """),
+            
+            'negative_analyzer': self._create_agent("""
+                You are a health risk assessment specialist.
+                Identify concerning findings and potential health risks.
+                Format findings as bullet points starting with "⚠".
+                Include severity levels and recommended actions.
+            """),
+            
+            'summary_agent': self._create_agent("""
+                You are a medical report summarizer.
+                Create a comprehensive yet concise summary of all findings.
+                Include key metrics, trends, and important observations.
+                Use clear, patient-friendly language.
+            """),
+            
+            'recommendation_agent': self._create_agent("""
+                You are a healthcare recommendations specialist.
+                Provide actionable advice based on the report findings.
+                Include lifestyle, diet, and exercise recommendations.
+                Prioritize suggestions by importance and urgency.
+            """)
+        }
+
+    def _create_agent(self, system_prompt: str):
+        """Create an agent with specific system prompt"""
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("human", "{input}")
+        ])
+        return prompt | self.llm | StrOutputParser()
+
+    async def process_document(self, file_content: str):
+        """Process document and create vector store"""
+        chunks = self.text_splitter.split_text(file_content)
+        self.vectorstore = await FAISS.afrom_texts(chunks, self.embeddings)
+        return chunks
+
+    async def analyze_report(self, report_text: str):
+        """Analyze report using multiple agents"""
+        results = {}
+        
+        # Process document first
+        await self.process_document(report_text)
+        
+        # Create progress bar
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        total_agents = len(self.agents)
+        for idx, (agent_name, agent) in enumerate(self.agents.items(), 1):
+            status_text.text(f"Running {agent_name.replace('_', ' ').title()}...")
+            start_time = time.time()
+            
+            try:
+                # Get relevant context from vectorstore
+                if self.vectorstore:
+                    relevant_docs = await self.vectorstore.asimilarity_search(
+                        agent_name,
+                        k=3
+                    )
+                    context = "\n".join(doc.page_content for doc in relevant_docs)
+                    augmented_text = f"Context: {context}\n\nReport: {report_text}"
+                else:
+                    augmented_text = report_text
+                
+                response = await agent.ainvoke({"input": augmented_text})
+                processing_time = time.time() - start_time
+                
+                results[agent_name] = AgentResponse(
+                    agent_name=agent_name,
+                    content=response,
+                    confidence=0.9,
+                    processing_time=processing_time
+                )
+                
+            except Exception as e:
+                results[agent_name] = AgentResponse(
+                    agent_name=agent_name,
+                    content=f"Error: {str(e)}",
+                    confidence=0.0,
+                    processing_time=0.0
+                )
+            
+            # Update progress
+            progress_bar.progress(idx / total_agents)
+        
+        status_text.text("Analysis complete!")
+        progress_bar.empty()
+        return results
+
+    async def generate_chat_response(self, query: str, context: str) -> str:
+        """Generate chat response using RAG"""
+        try:
+            if self.vectorstore:
+                relevant_chunks = await self.vectorstore.asimilarity_search(query, k=3)
+                additional_context = "\n".join(chunk.page_content for chunk in relevant_chunks)
+                full_context = f"{context}\n\nAdditional Context: {additional_context}"
+            else:
+                full_context = context
+
+            chat_prompt = ChatPromptTemplate.from_messages([
+                ("system", """You are a medical report assistant. Use the provided context to:
+                    1. Answer questions accurately
+                    2. Explain medical terms simply
+                    3. Provide evidence-based responses
+                    4. Maintain a helpful, professional tone"""),
+                ("human", "{query}"),
+                ("system", "Context: {context}")
+            ])
+            
+            chain = chat_prompt | self.llm | StrOutputParser()
+            
+            response = await chain.ainvoke({
+                "query": query,
+                "context": full_context
+            })
+            
+            return response
+        except Exception as e:
+            return f"I apologize, but I encountered an error: {str(e)}"
+
 class AgentStatus:
     """Enhanced agent status management with sidebar display"""
     def __init__(self):
