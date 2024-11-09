@@ -110,8 +110,7 @@ class AgentStatus:
             'positive_analyzer': {'status': 'idle', 'progress': 0, 'message': ''},
             'negative_analyzer': {'status': 'idle', 'progress': 0, 'message': ''},
             'summary_agent': {'status': 'idle', 'progress': 0, 'message': ''},
-            'recommendation_agent': {'status': 'idle', 'progress': 0, 'message': ''},
-            'chat_assistant': {'status': 'idle', 'progress': 0, 'message': ''}  # Added chat assistant status
+            'recommendation_agent': {'status': 'idle', 'progress': 0, 'message': ''}
         }
         
     def initialize_sidebar_placeholder(self):
@@ -344,30 +343,15 @@ class HealthReportAnalyzer:
         
         return results
 
-    async def generate_chat_response(self, query: str, context: str, agent_status: AgentStatus) -> str:
-        """Generate chat response using RAG with status updates"""
+    async def generate_chat_response(self, query: str, context: str) -> str:
+        """Generate chat response using RAG"""
         try:
-            # Update chat assistant status
-            agent_status.update_status(
-                'chat_assistant',
-                'working',
-                0.3,
-                'Processing query...'
-            )
-
             if self.vectorstore:
                 relevant_chunks = await self.vectorstore.asimilarity_search(query, k=3)
                 additional_context = "\n".join(chunk.page_content for chunk in relevant_chunks)
                 full_context = f"{context}\n\nAdditional Context: {additional_context}"
             else:
                 full_context = context
-
-            agent_status.update_status(
-                'chat_assistant',
-                'working',
-                0.6,
-                'Generating response...'
-            )
 
             chat_prompt = ChatPromptTemplate.from_messages([
                 ("system", """You are a medical report assistant. Use the provided context to:
@@ -385,22 +369,9 @@ class HealthReportAnalyzer:
                 "query": query,
                 "context": full_context
             })
-
-            agent_status.update_status(
-                'chat_assistant',
-                'completed',
-                1.0,
-                'Response generated'
-            )
             
             return response
         except Exception as e:
-            agent_status.update_status(
-                'chat_assistant',
-                'error',
-                1.0,
-                f'Error: {str(e)}'
-            )
             return f"I apologize, but I encountered an error: {str(e)}"
 
 def handle_chat_input():
@@ -449,8 +420,7 @@ def handle_chat_input():
             response = asyncio.run(
                 st.session_state.analyzer.generate_chat_response(
                     user_input,
-                    st.session_state.report_text,
-                    st.session_state.agent_status  # Pass agent_status to track chat progress
+                    st.session_state.report_text
                 )
             )
             
@@ -494,56 +464,56 @@ def main():
     if 'agent_status' not in st.session_state:
         st.session_state.agent_status = AgentStatus()
     
-    # Main title
-    st.sidebar.title("🏥 Health Report Analyzer")
-    st.sidebar.markdown("---")
+    # Initialize agent status display in sidebar
+    st.session_state.agent_status.initialize_sidebar_placeholder()
     
-    # File upload in sidebar
-    uploaded_file = st.sidebar.file_uploader(
-        "Upload your health report",
-        type=['pdf', 'txt'],
-        key='file_uploader'
-    )
-    
-    if uploaded_file:
-        analyze_btn = st.sidebar.button("🔍 Analyze Report", key='analyze_btn')
-        if analyze_btn:
-            try:
-                # Read document
-                if uploaded_file.type == "application/pdf":
-                    pdf_reader = PdfReader(uploaded_file)
-                    text = ""
-                    for page in pdf_reader.pages:
-                        text += page.extract_text()
-                else:
-                    text = uploaded_file.getvalue().decode()
-                
-                st.session_state.report_text = text
-                
-                # Reset all agent statuses to idle
-                for agent_name in st.session_state.agent_status.agents:
-                    st.session_state.agent_status.update_status(
-                        agent_name,
-                        'idle',
-                        0.0,
-                        'Waiting to start...'
+    # Sidebar
+    with st.sidebar:
+        st.title("🏥 Health Report Analyzer")
+        st.markdown("---")
+        
+        # File upload in sidebar
+        uploaded_file = st.file_uploader(
+            "Upload your health report",
+            type=['pdf', 'txt'],
+            key='file_uploader'
+        )
+        
+        if uploaded_file:
+            if st.button("🔍 Analyze Report", key='analyze_btn'):
+                try:
+                    # Read document
+                    if uploaded_file.type == "application/pdf":
+                        pdf_reader = PdfReader(uploaded_file)
+                        text = ""
+                        for page in pdf_reader.pages:
+                            text += page.extract_text()
+                    else:
+                        text = uploaded_file.getvalue().decode()
+                    
+                    st.session_state.report_text = text
+                    
+                    # Reset all agent statuses to idle
+                    for agent_name in st.session_state.agent_status.agents:
+                        st.session_state.agent_status.update_status(
+                            agent_name,
+                            'idle',
+                            0.0,
+                            'Waiting to start...'
+                        )
+                    
+                    # Analyze report with dynamic status updates
+                    st.session_state.report_results = asyncio.run(
+                        st.session_state.analyzer.analyze_report(
+                            text,
+                            st.session_state.agent_status
+                        )
                     )
-                
-                # Initialize agent status display in sidebar after file upload
-                st.session_state.agent_status.initialize_sidebar_placeholder()
-                
-                # Analyze report with dynamic status updates
-                st.session_state.report_results = asyncio.run(
-                    st.session_state.analyzer.analyze_report(
-                        text,
-                        st.session_state.agent_status
-                    )
-                )
-                
-                st.rerun()
-                
-            except Exception as e:
-                st.error(f"Error processing report: {str(e)}")
+                    
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"Error processing report: {str(e)}")
     
     # Main content area
     st.title("Health Report Analysis")
