@@ -7,3 +7,4 @@ langchain-google-genai
 faiss-cpu
 typing-extensions
 asyncio
+langchain-community
