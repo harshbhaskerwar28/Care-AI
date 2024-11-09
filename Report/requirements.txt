@@ -1,0 +1,9 @@
+python-dotenv
+streamlit
+PyPDF2
+langchain-groq
+langchain
+langchain-google-genai
+faiss-cpu
+typing-extensions
+asyncio
