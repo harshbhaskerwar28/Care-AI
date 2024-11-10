@@ -42,7 +42,7 @@ class AgentResponse:
     processing_time: float = 0.0
 
 class DocumentProcessor:
-    """Enhanced document processing with better error handling and progress tracking"""
+    """Document processing with vector store integration"""
     def __init__(self):
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
@@ -54,7 +54,6 @@ class DocumentProcessor:
         self.vector_store = None
 
     def _initialize_embeddings(self):
-        """Initialize Google AI embeddings"""
         try:
             self.embeddings = GoogleGenerativeAIEmbeddings(
                 model="models/embedding-001",
@@ -65,10 +64,10 @@ class DocumentProcessor:
             raise
 
     async def process_file(self, file, progress_callback) -> ProcessedDocument:
-        """Process a single file with progress tracking"""
         try:
             progress_callback(0.2, f"Processing {file.name}")
             
+            content = ""
             if file.type == "application/pdf":
                 content = await self.process_pdf(file)
                 doc_type = "PDF"
@@ -82,11 +81,9 @@ class DocumentProcessor:
             chunks = self.text_splitter.split_text(content)
             
             progress_callback(0.6, "Generating document summary")
-            summary = await self._generate_summary(content[:1000])  # Summary of first 1000 chars
+            summary = await self._generate_summary(content[:1000])
             
-            progress_callback(0.8, "Finalizing document processing")
-            
-            return ProcessedDocument(
+            processed_doc = ProcessedDocument(
                 filename=file.name,
                 content=content,
                 chunks=chunks,
@@ -94,72 +91,182 @@ class DocumentProcessor:
                 doc_type=doc_type,
                 summary=summary
             )
+            
+            self.processed_documents.append(processed_doc)
+            return processed_doc
+
         except Exception as e:
             st.error(f"Error processing {file.name}: {str(e)}")
             return None
 
     async def process_pdf(self, pdf_file) -> str:
-        """Process PDF file with enhanced error handling"""
         text = ""
         try:
-            pdf_reader = PdfReader(pdf_file)
-            for page_num, page in enumerate(pdf_reader.pages):
-                extracted_text = page.extract_text()
-                if extracted_text:
-                    text += f"Page {page_num + 1}:\n{extracted_text}\n\n"
+            bytes_data = pdf_file.read()
+            pdf_reader = PdfReader(io.BytesIO(bytes_data))
+            for page in pdf_reader.pages:
+                text += page.extract_text() + "\n"
             return text.strip()
         except Exception as e:
             raise Exception(f"PDF processing error: {str(e)}")
 
     async def process_image(self, image_file) -> str:
-        """Process image with OCR and error handling"""
         try:
-            image = Image.open(image_file)
+            image_bytes = image_file.read()
+            image = Image.open(io.BytesIO(image_bytes))
+            if image.mode not in ('L', 'RGB'):
+                image = image.convert('RGB')
             text = pytesseract.image_to_string(image)
             return text.strip()
         except Exception as e:
             raise Exception(f"Image processing error: {str(e)}")
 
     async def _generate_summary(self, text: str) -> str:
-        """Generate a brief summary of the document content"""
-        # You can implement this using your LLM of choice
-        # For now, returning first 200 characters as summary
         return f"{text[:200]}..."
 
-    async def update_vector_store(self, documents: List[ProcessedDocument], progress_callback):
-        """Update vector store with new documents"""
+    def get_relevant_context(self, query: str, num_chunks: int = 3) -> str:
+        """Get relevant context from vector store"""
         try:
-            all_chunks = []
-            metadata_list = []
-            
-            for idx, doc in enumerate(documents):
-                progress_callback(0.2 + (0.6 * (idx / len(documents))), 
-                                f"Indexing {doc.filename}")
-                
-                for chunk_idx, chunk in enumerate(doc.chunks):
-                    all_chunks.append(chunk)
-                    metadata_list.append({
-                        "source": doc.filename,
-                        "chunk_index": chunk_idx,
-                        "doc_type": doc.doc_type
-                    })
-
-            if all_chunks:
-                progress_callback(0.8, "Creating vector store")
-                self.vector_store = FAISS.from_texts(
-                    all_chunks,
-                    self.embeddings,
-                    metadatas=metadata_list
-                )
-                
-                progress_callback(0.9, "Saving vector store")
-                self.vector_store.save_local("faiss_index")
-                
-                return True
-                
+            if self.vector_store is None or not query.strip():
+                return ""
+            results = self.vector_store.similarity_search(query, k=num_chunks)
+            return "\n\n".join([doc.page_content for doc in results])
         except Exception as e:
-            st.error(f"Vector store update error: {str(e)}")
-            return False
+            st.error(f"Error retrieving context: {str(e)}")
+            return ""
+
+class HealthcareAgent:
+    """Healthcare agent with improved response handling"""
+    def __init__(self):
+        self.llm = ChatGroq(
+            temperature=0.3,
+            model_name="llama-3.1-8b-instant",
+            groq_api_key=os.getenv("GROQ_API_KEY")
+        )
+        self.chat_history = []
+        self.doc_processor = DocumentProcessor()
+        self._initialize_prompts()
+        self.agents = self._initialize_agents()
+
+    def _initialize_prompts(self):
+        """Initialize concise agent prompts"""
+        self.prompts = {
+            'main_agent': """You are a healthcare coordinator AI. Be concise and direct. For simple greetings or non-medical queries, respond briefly and naturally.
+For medical queries, analyze the context and query to determine if specialist consultation is needed.
+
+Context: {context}
+Query: {query}
+Chat History: {chat_history}
+
+Respond appropriately to the query type:
+1. For greetings/simple queries: Give a brief, friendly response
+2. For medical queries: Provide a concise initial assessment and determine if specialist input is needed""",
+
+            'synthesis_agent': """You are a medical information synthesizer. Keep responses focused and concise.
+Context: {context}
+Query: {query}
+Chat History: {chat_history}
+Agent Responses: {agent_responses}
+
+Provide a clear, concise response that:
+1. Addresses the query directly
+2. Includes only relevant information
+3. Uses simple language
+4. Maintains appropriate length for query complexity"""
+        }
+
+        # Add other specialist agent prompts similarly...
+
+    def _initialize_agents(self):
+        return {
+            name: ChatPromptTemplate.from_messages([
+                ("system", prompt),
+                ("human", "{input}")
+            ]) | self.llm | StrOutputParser()
+            for name, prompt in self.prompts.items()
+        }
+
+    def _format_chat_history(self) -> str:
+        formatted = []
+        for msg in self.chat_history[-3:]:  # Last 3 messages only
+            role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+            formatted.append(f"{role}: {msg.content}")
+        return "\n".join(formatted)
+
+    async def process_query(self, query: str, status_callback) -> Dict[str, AgentResponse]:
+        """Process query with improved response handling"""
+        try:
+            # For simple greetings or non-medical queries, use main agent only
+            if self._is_simple_query(query):
+                response = await self._get_agent_response(
+                    'main_agent',
+                    query,
+                    "",  # No context needed for simple queries
+                    self._format_chat_history()
+                )
+                return {'main_agent': response}
+
+            # For medical queries, use full agent system
+            context = self.doc_processor.get_relevant_context(query)
+            responses = await self._process_medical_query(query, context, status_callback)
+            return responses
+
+        except Exception as e:
+            status_callback('main_agent', 'error', 0, str(e))
+            raise
+
+    def _is_simple_query(self, query: str) -> bool:
+        """Determine if query is a simple greeting or non-medical query"""
+        simple_patterns = [
+            'hi', 'hello', 'hey', 'good morning', 'good afternoon', 
+            'good evening', 'how are you', 'thanks', 'thank you'
+        ]
+        return any(query.lower().strip().startswith(pattern) for pattern in simple_patterns)
+
+    async def _process_medical_query(self, query: str, context: str, status_callback) -> Dict[str, AgentResponse]:
+        """Process medical queries with full agent system"""
+        responses = {}
+        chat_history = self._format_chat_history()
+
+        # Get main agent response
+        status_callback('main_agent', 'working', 0.2, "Analyzing query")
+        main_response = await self._get_agent_response(
+            'main_agent',
+            query,
+            context,
+            chat_history
+        )
+        responses['main_agent'] = main_response
+
+        # Process through specialist agents if needed
+        if self._needs_specialist_consultation(main_response.content):
+            specialist_responses = await self._get_specialist_responses(
+                query,
+                context,
+                chat_history,
+                status_callback
+            )
+            responses.update(specialist_responses)
+
+        # Synthesize final response
+        status_callback('synthesis_agent', 'working', 0.8, "Creating final response")
+        final_response = await self._synthesize_responses(
+            query,
+            context,
+            chat_history,
+            responses
+        )
+        responses['synthesis_agent'] = final_response
+
+        return responses
+
+    def _needs_specialist_consultation(self, main_response: str) -> bool:
+        """Determine if specialist consultation is needed based on main agent response"""
+        medical_indicators = [
+            'symptom', 'condition', 'treatment', 'diagnosis', 'medical',
+            'health', 'pain', 'doctor', 'medicine', 'disease'
+        ]
+        return any(indicator in main_response.lower() for indicator in medical_indicators)
 
 class AgentStatus:
     """Enhanced agent status management with sidebar display"""
@@ -241,7 +348,6 @@ class AgentStatus:
                 </div>
             </div>
         """, unsafe_allow_html=True)
-
 
 class HealthcareAgent:
     """Enhanced healthcare agent with simplified document storage"""
