@@ -153,6 +153,7 @@ def get_estimated_time():
     from random import randint
     return randint(5, 15)
 
+
 def main():
     # Set dark theme
     st.set_page_config(
@@ -236,17 +237,37 @@ def main():
         if st.session_state.step == 'platform_choice':
             custom_card("Choose how you'd like to continue", color="#1E88E5")
             col1, col2 = st.columns(2)
+            
             with col1:
                 if st.button("Continue Here", use_container_width=True):
                     st.session_state.platform = "streamlit"
                     st.session_state.step = 'emergency_type'
                     st.rerun()
+            
             with col2:
-                if st.button("Open in Telegram", use_container_width=True):
-                    bot_username = "EmergencyEagleBot"
-                    telegram_url = f"https://t.me/{bot_username}"
-                    st.markdown(f"[Open Telegram Bot]({telegram_url})")
-                    st.stop()
+                bot_username = "EmergencyEagleBot"
+                telegram_url = f"tg://resolve?domain={bot_username}"
+                
+                # Use HTML to create a button that directly opens Telegram
+                st.markdown(
+                    f'''
+                    <a href="{telegram_url}" target="_blank">
+                        <button style="
+                            width: 100%;
+                            border-radius: 20px;
+                            height: 3em;
+                            font-weight: 600;
+                            background-color: #2C2C2C;
+                            color: #E0E0E0;
+                            border: 1px solid #404040;
+                            cursor: pointer;
+                        ">
+                            Open in Telegram
+                        </button>
+                    </a>
+                    ''',
+                    unsafe_allow_html=True
+                )
 
         elif st.session_state.step == 'emergency_type':
             custom_card("Select Emergency Type", color="#FF4B4B")
@@ -324,7 +345,7 @@ def main():
         elif st.session_state.step == 'summary':
             emergency_details = {
                 'type': st.session_state.emergency_type,
-                'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'time': datetime.now().strftime("%Y-%m-%-d %H:%M:%S"),
                 'current_location': st.session_state.current_location,
                 'text_address': st.session_state.text_address
             }
@@ -372,6 +393,10 @@ def main():
             for key in st.session_state.keys():
                 del st.session_state[key]
             st.rerun()
+
+if __name__ == "__main__":
+    main()
+
 
 if __name__ == "__main__":
     main()
