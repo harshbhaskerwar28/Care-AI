@@ -17,7 +17,7 @@ COLOR_SCHEME = {
     'warning': '#FBBF24',
     'danger': '#EF4444',
     'background': '#F3F4F6',
-    'text': '#000000'
+    'text': '#ffffff'
 }
 
 # Load configuration
