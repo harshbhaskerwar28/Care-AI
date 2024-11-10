@@ -117,11 +117,11 @@ def custom_card(title, content=None, color="#FF4B4B"):
             padding: 20px;
             border-radius: 10px;
             margin: 10px 0;
-            background-color: white;
+            background-color: #1E1E1E;
             border-left: 5px solid {color};
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
             <h3 style="color: {color}; margin-top: 0;">{title}</h3>
-            {f'<p style="color: #000000; margin-bottom: 0;">{content}</p>' if content else ''}
+            {f'<p style="color: #E0E0E0; margin-bottom: 0;">{content}</p>' if content else ''}
         </div>
         """,
         unsafe_allow_html=True
@@ -154,34 +154,78 @@ def get_estimated_time():
     return randint(5, 15)
 
 def main():
+    # Set dark theme
     st.set_page_config(
         page_title="Emergency Assistance",
         page_icon="🚑",
         layout="centered",
-        initial_sidebar_state="collapsed"
+        initial_sidebar_state="collapsed",
+        menu_items={
+            'Get Help': None,
+            'Report a bug': None,
+            'About': None
+        }
     )
 
     # Initialize session state
     initialize_session_state()
 
-    # Custom CSS
+    # Custom CSS for dark theme
     st.markdown("""
         <style>
+        /* Dark theme styles */
+        body {
+            background-color: #121212;
+            color: #E0E0E0;
+        }
         .main {
             padding: 2rem;
             max-width: 900px;
             margin: 0 auto;
+            background-color: #121212;
         }
         .stButton button {
             width: 100%;
             border-radius: 20px;
             height: 3em;
             font-weight: 600;
+            background-color: #2C2C2C;
+            color: #E0E0E0;
+            border: 1px solid #404040;
+        }
+        .stButton button:hover {
+            background-color: #404040;
+            border-color: #505050;
         }
         .emergency-title {
             color: #FF4B4B;
             text-align: center;
             margin-bottom: 2em;
+        }
+        .stTextInput input, .stTextArea textarea {
+            background-color: #2C2C2C;
+            color: #E0E0E0;
+            border: 1px solid #404040;
+        }
+        .stTextInput input:focus, .stTextArea textarea:focus {
+            border-color: #505050;
+            box-shadow: 0 0 0 1px #505050;
+        }
+        .uploadedFile {
+            background-color: #2C2C2C;
+            color: #E0E0E0;
+            border: 1px solid #404040;
+        }
+        .css-1d391kg {
+            background-color: #1E1E1E;
+        }
+        .folium-map {
+            border: 2px solid #404040;
+            border-radius: 10px;
+        }
+        /* Override Streamlit's default white background */
+        .stApp {
+            background-color: #121212;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -238,9 +282,13 @@ def main():
 
         elif st.session_state.step == 'current_location':
             custom_card("Select Your Location on the Map", color="#4CAF50")
-            # Display the map with a folium map to select location
+            # Create a dark-themed map
             map_center = [20.5937, 78.9629]  # Example center location
-            m = folium.Map(location=map_center, zoom_start=5)
+            m = folium.Map(
+                location=map_center,
+                zoom_start=5,
+                tiles="cartodbdark_matter"  # Dark theme tiles
+            )
             map_data = st_folium(m, width=700, height=500)
 
             if map_data["last_clicked"]:
