@@ -259,7 +259,7 @@ def main():
         }
         
         h1, h2, h3 {
-            color: #1F2937;
+            color: #ffffff;
             font-weight: 700;
         }
         </style>
