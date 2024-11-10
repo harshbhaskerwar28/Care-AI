@@ -5,7 +5,8 @@ import aiohttp
 from typing import Dict, List, Optional, Union
 from dataclasses import dataclass
 import pytesseract
-from PIL import Image
+from PIL import Image, ImageEnhance
+from pdf2image import convert_from_bytes
 from PyPDF2 import PdfReader
 import streamlit as st
 from langchain_groq import ChatGroq
@@ -18,8 +19,18 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
 import time
 import json
+import sys
+import platform
 
 load_dotenv()
+
+# Determine OS and set Tesseract path
+if platform.system() == "Windows":
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+elif platform.system() == "Darwin":  # macOS
+    pytesseract.pytesseract.tesseract_cmd = '/usr/local/bin/tesseract'
+else:  # Linux
+    pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 
 @dataclass
 class ProcessedDocument:
@@ -41,7 +52,7 @@ class AgentResponse:
     processing_time: float = 0.0
 
 class DocumentProcessor:
-    """Enhanced document processing with better error handling and progress tracking"""
+    """Enhanced document processing with improved image handling"""
     def __init__(self):
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
@@ -51,6 +62,19 @@ class DocumentProcessor:
         self.processed_documents: List[ProcessedDocument] = []
         self._initialize_embeddings()
         self.vector_store = None
+        self._verify_tesseract()
+
+    def _verify_tesseract(self):
+        """Verify Tesseract installation"""
+        try:
+            pytesseract.get_tesseract_version()
+        except Exception as e:
+            st.error("Tesseract is not properly installed. Please install Tesseract OCR first.")
+            st.info("Installation guides:\n" +
+                   "- Windows: Download from https://github.com/UB-Mannheim/tesseract/wiki\n" +
+                   "- Linux: sudo apt-get install tesseract-ocr\n" +
+                   "- macOS: brew install tesseract")
+            raise Exception("Tesseract not installed")
 
     def _initialize_embeddings(self):
         """Initialize Google AI embeddings"""
@@ -64,18 +88,24 @@ class DocumentProcessor:
             raise
 
     async def process_file(self, file, progress_callback) -> ProcessedDocument:
-        """Process a single file with progress tracking"""
+        """Process a single file with enhanced error handling"""
         try:
             progress_callback(0.2, f"Processing {file.name}")
             
+            # Debug information
+            st.info(f"Processing file: {file.name} of type: {file.type}")
+            
             if file.type == "application/pdf":
-                content = await self.process_pdf(file)
+                content = await self.process_pdf_with_ocr(file)
                 doc_type = "PDF"
             elif file.type.startswith("image/"):
                 content = await self.process_image(file)
                 doc_type = "Image"
             else:
                 raise ValueError(f"Unsupported file type: {file.type}")
+
+            if not content or not content.strip():
+                raise ValueError(f"No content extracted from {file.name}")
 
             progress_callback(0.4, "Splitting content into chunks")
             chunks = self.text_splitter.split_text(content)
@@ -85,7 +115,7 @@ class DocumentProcessor:
             
             progress_callback(0.8, "Finalizing document processing")
             
-            return ProcessedDocument(
+            processed_doc = ProcessedDocument(
                 filename=file.name,
                 content=content,
                 chunks=chunks,
@@ -93,31 +123,130 @@ class DocumentProcessor:
                 doc_type=doc_type,
                 summary=summary
             )
+            
+            self.processed_documents.append(processed_doc)
+            return processed_doc
+
         except Exception as e:
             st.error(f"Error processing {file.name}: {str(e)}")
+            import traceback
+            st.error(f"Detailed error: {traceback.format_exc()}")
             return None
 
-    async def process_pdf(self, pdf_file) -> str:
-        """Process PDF file with enhanced error handling"""
+    async def process_image(self, image_file) -> str:
+        """Improved image processing with enhanced error handling and image preprocessing"""
+        try:
+            # Read image bytes
+            image_bytes = image_file.getvalue()
+            
+            # Open image with PIL
+            with Image.open(io.BytesIO(image_bytes)) as image:
+                # Convert to RGB if necessary
+                if image.mode not in ('L', 'RGB'):
+                    image = image.convert('RGB')
+                
+                # Create enhanced image
+                enhanced_image = self._enhance_image_for_ocr(image)
+                
+                # Show processing status
+                st.info("Performing OCR on image...")
+                
+                # Perform OCR with detailed configuration
+                custom_config = r'--oem 3 --psm 6 -l eng'
+                text = pytesseract.image_to_string(enhanced_image, config=custom_config)
+                
+                if not text.strip():
+                    # Try again with different preprocessing
+                    enhanced_image = self._alternative_enhancement(image)
+                    text = pytesseract.image_to_string(enhanced_image, config=custom_config)
+                
+                if not text.strip():
+                    raise ValueError("OCR failed to extract any text from the image")
+                
+                return text.strip()
+
+        except Exception as e:
+            st.error(f"Image processing error: {str(e)}")
+            st.error("Please ensure the image is clear and contains readable text")
+            raise
+
+    def _enhance_image_for_ocr(self, image):
+        """Enhanced image preprocessing for better OCR results"""
+        try:
+            # Convert to grayscale
+            grayscale = image.convert('L')
+            
+            # Enhance contrast
+            enhancer = ImageEnhance.Contrast(grayscale)
+            enhanced = enhancer.enhance(2.0)
+            
+            # Increase sharpness
+            enhancer = ImageEnhance.Sharpness(enhanced)
+            enhanced = enhancer.enhance(2.0)
+            
+            # Resize if image is too small
+            if enhanced.size[0] < 1000:
+                ratio = 1000 / enhanced.size[0]
+                enhanced = enhanced.resize(
+                    (int(enhanced.size[0] * ratio), 
+                     int(enhanced.size[1] * ratio)),
+                    Image.Resampling.LANCZOS
+                )
+            
+            return enhanced
+            
+        except Exception as e:
+            st.error(f"Image enhancement error: {str(e)}")
+            return image
+
+    def _alternative_enhancement(self, image):
+        """Alternative image preprocessing method"""
+        try:
+            # Convert to grayscale
+            grayscale = image.convert('L')
+            
+            # Binarization
+            threshold = 128
+            binary = grayscale.point(lambda x: 0 if x < threshold else 255, '1')
+            
+            return binary
+            
+        except Exception as e:
+            st.error(f"Alternative enhancement error: {str(e)}")
+            return image
+
+    async def process_pdf_with_ocr(self, pdf_file) -> str:
+        """Enhanced PDF processing with OCR capability"""
         text = ""
         try:
+            # First try regular PDF text extraction
             pdf_reader = PdfReader(pdf_file)
-            for page_num, page in enumerate(pdf_reader.pages):
+            for page in pdf_reader.pages:
                 extracted_text = page.extract_text()
                 if extracted_text:
-                    text += f"Page {page_num + 1}:\n{extracted_text}\n\n"
+                    text += extracted_text + "\n\n"
+            
+            # If no text found, apply OCR
+            if not text.strip():
+                st.info("No text found in PDF, applying OCR...")
+                pdf_bytes = pdf_file.getvalue()
+                images = convert_from_bytes(pdf_bytes)
+                
+                for i, image in enumerate(images):
+                    st.info(f"Processing page {i+1} with OCR...")
+                    enhanced_image = self._enhance_image_for_ocr(image)
+                    page_text = pytesseract.image_to_string(enhanced_image)
+                    if page_text:
+                        text += f"Page {i+1}:\n{page_text}\n\n"
+            
+            if not text.strip():
+                raise ValueError("No text could be extracted from the PDF")
+                
             return text.strip()
+            
         except Exception as e:
-            raise Exception(f"PDF processing error: {str(e)}")
-
-    async def process_image(self, image_file) -> str:
-        """Process image with OCR and error handling"""
-        try:
-            image = Image.open(image_file)
-            text = pytesseract.image_to_string(image)
-            return text.strip()
-        except Exception as e:
-            raise Exception(f"Image processing error: {str(e)}")
+            st.error(f"PDF processing error: {str(e)}")
+            raise
 
     async def _generate_summary(self, text: str) -> str:
         """Generate a brief summary of the document content"""
@@ -157,6 +286,7 @@ class DocumentProcessor:
         except Exception as e:
             st.error(f"Vector store update error: {str(e)}")
             return False
+
 
 class AgentStatus:
     """Enhanced agent status management with sidebar display"""
