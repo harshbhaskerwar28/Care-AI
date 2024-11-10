@@ -1,11 +1,12 @@
 python-dotenv
 streamlit
+aiohttp
+pytesseract
+Pillow
+pdf2image
 PyPDF2
 langchain-groq
 langchain
 langchain-google-genai
 faiss-cpu
-typing-extensions
-asyncio
-langchain-community
-pytesseract
+poppler-utils
