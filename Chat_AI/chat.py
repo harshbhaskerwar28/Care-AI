@@ -24,13 +24,6 @@ import platform
 
 load_dotenv()
 
-# Determine OS and set Tesseract path
-if platform.system() == "Windows":
-    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-elif platform.system() == "Darwin":  # macOS
-    pytesseract.pytesseract.tesseract_cmd = '/usr/local/bin/tesseract'
-else:  # Linux
-    pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 
 @dataclass
 class ProcessedDocument:
