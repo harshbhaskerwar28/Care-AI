@@ -217,14 +217,41 @@ class HealthReportAnalyzer:
             'positive_analyzer': self._create_agent("""
                 You are a positive health findings specialist.
                 Identify and explain all positive health indicators in the report.
-                Format your response as clear bullet points starting with "✓".
-                Include the significance of each positive finding.
+                
+                IMPORTANT FORMATTING INSTRUCTIONS:
+                1. Each finding MUST start on a new line with a checkmark symbol (✓)
+                2. After each finding value and range, add a new line with two spaces of indentation for the significance
+                3. Add a blank line between each complete finding
+                
+                Format each finding exactly like this:
+                
+                ✓ [Test Name]: [Value] [Unit] (normal range: [range])
+                  Significance: [Brief explanation of why this is positive]
+                
+                [blank line here]
+                ✓ [Next Test Name]: [Value] [Unit] (normal range: [range])
+                  Significance: [Brief explanation of why this is positive]
+                
+                Example:
+                ✓ Hemoglobin: 14.5 g/dL (normal range: 13.0-17.0 g/dL)
+                  Significance: Excellent oxygen-carrying capacity, indicating good red blood cell function
+                
+                ✓ White Blood Cells: 7.2 x 10^9/L (normal range: 4.0-10.0 x 10^9/L)
+                  Significance: Strong immune system function within optimal range
+                
+                Ensure each finding has:
+                - Checkmark symbol at start
+                - Clear test name and value
+                - Normal range in parentheses
+                - Significance on next line with indentation
+                - Blank line after each complete finding
             """),
             
             'negative_analyzer': self._create_agent("""
                 You are a health risk assessment specialist.
                 Identify concerning findings and potential health risks.
                 Format findings as bullet points starting with "⚠".
+                Each finding must be on a new line.
                 Include severity levels and recommended actions.
             """),
             
@@ -233,6 +260,7 @@ class HealthReportAnalyzer:
                 Create a comprehensive yet concise summary of all findings.
                 Include key metrics, trends, and important observations.
                 Use clear, patient-friendly language.
+                Format with clear sections and bullet points.
             """),
             
             'recommendation_agent': self._create_agent("""
@@ -240,6 +268,7 @@ class HealthReportAnalyzer:
                 Provide actionable advice based on the report findings.
                 Include lifestyle, diet, and exercise recommendations.
                 Prioritize suggestions by importance and urgency.
+                Format each recommendation on a new line with clear categorization.
             """)
         }
 
@@ -251,20 +280,50 @@ class HealthReportAnalyzer:
         ])
         return prompt | self.llm | StrOutputParser()
 
+    def _format_findings(self, response: str) -> str:
+        """Format the findings to ensure proper line breaks and spacing"""
+        # First, ensure we're working with a string
+        if not isinstance(response, str):
+            return str(response)
+
+        # Split on checkmark symbol, preserving the symbol
+        findings = [f.strip() for f in response.split('✓') if f.strip()]
+        
+        formatted_findings = []
+        for finding in findings:
+            # Split finding into main result and significance (if present)
+            lines = [line.strip() for line in finding.split('\n') if line.strip()]
+            
+            if lines:
+                # Format main finding line
+                main_finding = lines[0]
+                formatted_finding = [f"✓ {main_finding}"]
+                
+                # Format significance and any additional lines
+                for line in lines[1:]:
+                    if line.startswith('Significance:'):
+                        formatted_finding.append(f"  {line}")
+                    else:
+                        formatted_finding.append(f"  {line}")
+                
+                # Join the lines for this finding
+                formatted_findings.append('\n'.join(formatted_finding))
+        
+        # Join all findings with double newlines for spacing
+        return '\n\n'.join(formatted_findings)
+
     async def process_document(self, file_content: str):
         """Process document and create vector store"""
         try:
-            # Split the text into chunks
             chunks = self.text_splitter.split_text(file_content)
             
             if not chunks:
                 raise ValueError("No text chunks were created from the document")
 
-            # Create embeddings and FAISS index
             self.vectorstore = await FAISS.afrom_texts(
                 texts=chunks,
                 embedding=self.embeddings,
-                normalize_L2=True  # Enable L2 normalization for better matching
+                normalize_L2=True
             )
             
             return chunks
@@ -276,7 +335,6 @@ class HealthReportAnalyzer:
         """Analyze report using multiple agents with dynamic status updates"""
         results = {}
         
-        # Update document processor status
         agent_status.update_status(
             'document_processor',
             'working',
@@ -285,7 +343,6 @@ class HealthReportAnalyzer:
         )
         
         try:
-            # Process document first
             await self.process_document(report_text)
             agent_status.update_status(
                 'document_processor',
@@ -294,10 +351,8 @@ class HealthReportAnalyzer:
                 'Document processed'
             )
             
-            # Process each agent sequentially
             agents_list = list(self.agents.items())
-            for idx, (agent_name, agent) in enumerate(agents_list[1:], 1):  # Skip document_processor
-                # Update status to working
+            for idx, (agent_name, agent) in enumerate(agents_list[1:], 1):
                 agent_status.update_status(
                     agent_name,
                     'working',
@@ -308,7 +363,7 @@ class HealthReportAnalyzer:
                 start_time = time.time()
                 
                 try:
-                    # Get relevant context from vectorstore
+                    # Get relevant context
                     if self.vectorstore is not None:
                         relevant_docs = await self.vectorstore.asimilarity_search(
                             agent_name,
@@ -319,7 +374,6 @@ class HealthReportAnalyzer:
                     else:
                         augmented_text = report_text
                     
-                    # Update status to show progress
                     agent_status.update_status(
                         agent_name,
                         'working',
@@ -327,7 +381,11 @@ class HealthReportAnalyzer:
                         'Analyzing content...'
                     )
                     
+                    # Get response and apply formatting for positive_analyzer
                     response = await agent.ainvoke({"input": augmented_text})
+                    if agent_name == 'positive_analyzer':
+                        response = self._format_findings(response)
+                    
                     processing_time = time.time() - start_time
                     
                     results[agent_name] = AgentResponse(
@@ -337,7 +395,6 @@ class HealthReportAnalyzer:
                         processing_time=processing_time
                     )
                     
-                    # Update status to completed
                     agent_status.update_status(
                         agent_name,
                         'completed',
@@ -353,7 +410,6 @@ class HealthReportAnalyzer:
                         processing_time=0.0
                     )
                     
-                    # Update status to error
                     agent_status.update_status(
                         agent_name,
                         'error',
@@ -401,7 +457,6 @@ class HealthReportAnalyzer:
             error_message = f"Error generating chat response: {str(e)}"
             st.error(error_message)
             return f"I apologize, but I encountered an error: {str(e)}"
-
 def handle_chat_input():
     """Handle chat input and response"""
     if "chat_messages" not in st.session_state:
