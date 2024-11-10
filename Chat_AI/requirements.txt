@@ -10,3 +10,4 @@ langchain
 langchain-google-genai
 faiss-cpu
 poppler-utils
+langchain-community
