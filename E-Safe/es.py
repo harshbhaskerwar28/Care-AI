@@ -153,7 +153,6 @@ def get_estimated_time():
     from random import randint
     return randint(5, 15)
 
-
 def main():
     # Set dark theme
     st.set_page_config(
@@ -231,7 +230,55 @@ def main():
         </style>
     """, unsafe_allow_html=True)
 
-@@ -238,9 +282,13 @@ def main():
+    if not st.session_state.alert_sent:
+        st.markdown('<h1 class="emergency-title">🚑 Emergency Assistance</h1>', unsafe_allow_html=True)
+
+        if st.session_state.step == 'platform_choice':
+            custom_card("Choose how you'd like to continue", color="#1E88E5")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Continue Here", use_container_width=True):
+                    st.session_state.platform = "streamlit"
+                    st.session_state.step = 'emergency_type'
+                    st.rerun()
+            with col2:
+                if st.button("Open in Telegram", use_container_width=True):
+                    bot_username = "EmergencyEagleBot"
+                    telegram_url = f"https://t.me/{bot_username}"
+                    st.markdown(f"[Open Telegram Bot]({telegram_url})")
+                    st.stop()
+
+        elif st.session_state.step == 'emergency_type':
+            custom_card("Select Emergency Type", color="#FF4B4B")
+            emergency_options = {
+                "Medical Emergency": "🏥",
+                "Accident": "🚗",
+                "Heart/Chest Pain": "❤️",
+                "Pregnancy": "👶"
+            }
+            
+            cols = st.columns(2)
+            for i, (option, emoji) in enumerate(emergency_options.items()):
+                with cols[i % 2]:
+                    if st.button(f"{emoji} {option}", use_container_width=True):
+                        st.session_state.emergency_type = option
+                        st.session_state.step = 'location_choice'
+                        st.rerun()
+
+        elif st.session_state.step == 'location_choice':
+            custom_card("Share Your Location", color="#4CAF50")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📍 Share Location", use_container_width=True):
+                    st.session_state.location_choice = "location"
+                    st.session_state.step = 'current_location'
+                    st.rerun()
+                
+            with col2:
+                if st.button("✍️ Enter Address", use_container_width=True):
+                    st.session_state.location_choice = "address"
+                    st.session_state.step = 'text_address'
+                    st.rerun()
 
         elif st.session_state.step == 'current_location':
             custom_card("Select Your Location on the Map", color="#4CAF50")
@@ -245,3 +292,86 @@ def main():
             map_data = st_folium(m, width=700, height=500)
 
             if map_data["last_clicked"]:
+                latitude, longitude = map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]
+                st.session_state.current_location = {"latitude": latitude, "longitude": longitude}
+                st.session_state.step = 'photos'
+                st.success(f"Location captured: {latitude}, {longitude}")
+                st.rerun()
+
+        elif st.session_state.step == 'text_address':
+            custom_card("Enter Your Address", color="#4CAF50")
+            text_address = st.text_area("Complete Address")
+            if st.button("Continue", use_container_width=True):
+                if text_address:
+                    st.session_state.text_address = text_address
+                    st.session_state.step = 'photos'
+                    st.rerun()
+                else:
+                    st.error("Please enter your address")
+
+        elif st.session_state.step == 'photos':
+            custom_card("Upload Photos (Optional)", color="#9C27B0")
+            uploaded_files = st.file_uploader(
+                "Upload photos of the emergency situation",
+                type=["jpg", "jpeg", "png"],
+                accept_multiple_files=True
+            )
+            if st.button("Send Emergency Alert", use_container_width=True):
+                st.session_state.photos = uploaded_files
+                st.session_state.step = 'summary'
+                st.rerun()
+
+        elif st.session_state.step == 'summary':
+            emergency_details = {
+                'type': st.session_state.emergency_type,
+                'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'current_location': st.session_state.current_location,
+                'text_address': st.session_state.text_address
+            }
+
+            with st.spinner("Dispatching Emergency Services..."):
+                if send_emergency_alert_to_admin(emergency_details, st.session_state.photos):
+                    st.session_state.alert_sent = True
+                    st.session_state.emergency_status = "en_route"
+                    estimated_time = get_estimated_time()
+                    st.session_state.estimated_time = estimated_time
+                    st.rerun()
+                else:
+                    st.error("Failed to send alert. Please try again.")
+
+    else:
+        # Emergency services dispatched view
+        st.markdown('<h1 class="emergency-title">Emergency Services En Route</h1>', unsafe_allow_html=True)
+        
+        custom_card(
+            "🚑 Help is on the way!",
+            f"Estimated arrival time: {st.session_state.estimated_time} minutes",
+            "#4CAF50"
+        )
+
+        custom_card(
+            "📝 Important Instructions",
+            """
+            • Stay calm and remain in your current location
+            • Keep your phone nearby
+            • Gather any relevant medical documents
+            • Clear the path for emergency responders
+            • If possible, have someone wait outside to guide the team
+            """,
+            "#1E88E5"
+        )
+
+        custom_card(
+            "🆘 Emergency Contact",
+            "If your condition worsens or you need immediate assistance, call 911",
+            "#FF4B4B"
+        )
+
+        # Reset button (bottom of page)
+        if st.button("Start New Emergency Request", use_container_width=True):
+            for key in st.session_state.keys():
+                del st.session_state[key]
+            st.rerun()
+
+if __name__ == "__main__":
+    main()
