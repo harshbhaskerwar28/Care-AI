@@ -276,7 +276,7 @@ Provide a detailed response including:
 4. Initial assessment
 5. Questions for clarification (if needed)""",
 
-'diagnosis_agent': """You are a medical diagnosis specialist. Analyze:
+            'diagnosis_agent': """You are a medical diagnosis specialist. Analyze:
 Context: {context}
 Query: {query}
 Chat History: {chat_history}
@@ -295,7 +295,7 @@ Provide a structured response with:
 4. Recommended diagnostic steps
 5. Urgency assessment""",
 
-'treatment_agent': """You are a treatment specialist. Consider:
+            'treatment_agent': """You are a treatment specialist. Consider:
 Context: {context}
 Query: {query}
 Chat History: {chat_history}
@@ -314,7 +314,7 @@ Provide recommendations for:
 4. Follow-up care
 5. Warning signs to watch""",
 
-'research_agent': """You are a medical research specialist. Research:
+            'research_agent': """You are a medical research specialist. Research:
 Context: {context}
 Query: {query}
 Chat History: {chat_history}
@@ -333,7 +333,7 @@ Provide analysis of:
 4. Future directions
 5. Knowledge gaps""",
 
-'synthesis_agent': """You are a medical information synthesizer. Integrate:
+            'synthesis_agent': """You are a medical information synthesizer. Integrate:
 Context: {context}
 Query: {query}
 Chat History: {chat_history}
