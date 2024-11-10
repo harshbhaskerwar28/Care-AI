@@ -242,8 +242,9 @@ class AgentStatus:
             </div>
         """, unsafe_allow_html=True)
 
+
 class HealthcareAgent:
-    """Enhanced healthcare agent with improved multi-agent coordination"""
+    """Enhanced healthcare agent with simplified document storage"""
     def __init__(self):
         self.llm = ChatGroq(
             temperature=0.3,
@@ -391,7 +392,7 @@ Ensure the response is:
                     processed_docs.append(doc)
 
             if processed_docs:
-                success = await self.doc_processor.update_vector_store(
+                success = await self.doc_processor.update_document_store(
                     processed_docs,
                     lambda p, m: status_callback(
                         'document_processor',
@@ -428,17 +429,13 @@ Ensure the response is:
             return False
 
     async def get_relevant_context(self, query: str) -> str:
-        """Get relevant context from vector store"""
+        """Get relevant context using simple keyword search"""
         try:
-            if self.doc_processor.vector_store:
-                docs = self.doc_processor.vector_store.similarity_search(
-                    query,
-                    k=3
-                )
-                return "\n\n".join(doc.page_content for doc in docs)
+            relevant_docs = self.doc_processor.doc_store.search(query, k=3)
+            return "\n\n".join(relevant_docs)
         except Exception as e:
-            st.error(f"Error retrieving context: {str(e)}")
-        return ""
+            print(f"Error retrieving context: {str(e)}")
+            return ""
 
     async def process_query(
         self,
@@ -599,6 +596,7 @@ Ensure the response is:
 
         except Exception as e:
             raise Exception(f"Synthesis error: {str(e)}")
+
 
 def setup_streamlit_ui():
     """Setup enhanced Streamlit UI with dark sidebar"""
