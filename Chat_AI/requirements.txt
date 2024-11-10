@@ -8,3 +8,4 @@ faiss-cpu
 typing-extensions
 asyncio
 langchain-community
+pytesseract
