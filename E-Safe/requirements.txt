@@ -1,0 +1,10 @@
+streamlit
+python-dotenv
+google-generativeai
+nltk
+geopy
+Pillow
+requests
+python-telegram-bot
+folium
+streamlit-folium
