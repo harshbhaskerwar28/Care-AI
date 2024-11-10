@@ -1,329 +1,848 @@
-import streamlit as st
 import os
-import logging
-from dotenv import load_dotenv
-import nltk
-import re
-from geopy.geocoders import Nominatim
-from PIL import Image
 import io
-import requests
-from datetime import datetime
-import urllib.parse
-import folium
-from streamlit_folium import st_folium
-
-# Download required NLTK data
-nltk.download('punkt', quiet=True)
-nltk.download('stopwords', quiet=True)
-nltk.download('averaged_perceptron_tagger', quiet=True)
-nltk.download('maxent_ne_chunker', quiet=True)
-nltk.download('words', quiet=True)
+import asyncio
+import aiohttp
+from typing import Dict, List, Optional, Union
+from dataclasses import dataclass
+import pytesseract
+from PIL import Image
+from PyPDF2 import PdfReader
+import streamlit as st
+from langchain_groq import ChatGroq
+from langchain.schema import AIMessage, HumanMessage, SystemMessage
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.schema.output_parser import StrOutputParser
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from dotenv import load_dotenv
+import time
+import json
 
 # Load environment variables
 load_dotenv()
 
-# Tokens and IDs
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
+@dataclass
+class ProcessedDocument:
+    """Structure for processed document information"""
+    filename: str
+    content: str
+    chunks: List[str]
+    total_chars: int
+    doc_type: str
+    summary: str = ""
 
-# Configure logging
-logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
-logger = logging.getLogger(__name__)
+@dataclass
+class AgentResponse:
+    """Structure for storing agent responses"""
+    agent_name: str
+    content: str
+    confidence: float
+    metadata: Dict = None
+    processing_time: float = 0.0
 
-
-def send_emergency_alert_to_admin(emergency_details, uploaded_files):
-    """Send emergency details and images to admin chat"""
-    try:
-        base_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
-        
-        alert_message = (
-            "🚨 NEW EMERGENCY ALERT 🚨\n\n"
-            f"Type: {emergency_details['type']}\n"
-            f"Time: {emergency_details['time']}\n\n"
+class DocumentProcessor:
+    """Document processing with vector store integration"""
+    def __init__(self):
+        self.text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200,
+            separators=["\n\n", "\n", ". ", " ", ""]
         )
+        self.processed_documents: List[ProcessedDocument] = []
+        self._initialize_embeddings()
+        self.vector_store = None
 
-        # Handle location information
-        if emergency_details.get('current_location'):
-            try:
-                # Parse location string to get coordinates
-                if isinstance(emergency_details['current_location'], str):
-                    lat, lon = map(float, emergency_details['current_location'].split(','))
-                else:
-                    lat = emergency_details['current_location'].get('latitude')
-                    lon = emergency_details['current_location'].get('longitude')
+    def _initialize_embeddings(self):
+        try:
+            self.embeddings = GoogleGenerativeAIEmbeddings(
+                model="models/embedding-001",
+                google_api_key=os.getenv("GOOGLE_API_KEY")
+            )
+        except Exception as e:
+            st.error(f"Failed to initialize embeddings: {str(e)}")
+            raise
 
-                # Create Google Maps link
-                maps_link = f"https://www.google.com/maps?q={lat},{lon}"
+    async def process_file(self, file, progress_callback) -> ProcessedDocument:
+        try:
+            progress_callback(0.2, f"Processing {file.name}")
+            
+            content = ""
+            if file.type == "application/pdf":
+                content = await self.process_pdf(file)
+                doc_type = "PDF"
+            elif file.type.startswith("image/"):
+                content = await self.process_image(file)
+                doc_type = "Image"
+            else:
+                raise ValueError(f"Unsupported file type: {file.type}")
+
+            progress_callback(0.4, "Splitting content into chunks")
+            chunks = self.text_splitter.split_text(content)
+            
+            progress_callback(0.6, "Generating document summary")
+            summary = await self._generate_summary(content[:1000])
+            
+            processed_doc = ProcessedDocument(
+                filename=file.name,
+                content=content,
+                chunks=chunks,
+                total_chars=len(content),
+                doc_type=doc_type,
+                summary=summary
+            )
+            
+            self.processed_documents.append(processed_doc)
+            return processed_doc
+
+        except Exception as e:
+            st.error(f"Error processing {file.name}: {str(e)}")
+            return None
+
+    async def process_pdf(self, pdf_file) -> str:
+        text = ""
+        try:
+            bytes_data = pdf_file.read()
+            pdf_reader = PdfReader(io.BytesIO(bytes_data))
+            for page in pdf_reader.pages:
+                text += page.extract_text() + "\n"
+            return text.strip()
+        except Exception as e:
+            raise Exception(f"PDF processing error: {str(e)}")
+
+    async def process_image(self, image_file) -> str:
+        try:
+            image_bytes = image_file.read()
+            image = Image.open(io.BytesIO(image_bytes))
+            if image.mode not in ('L', 'RGB'):
+                image = image.convert('RGB')
+            text = pytesseract.image_to_string(image)
+            return text.strip()
+        except Exception as e:
+            raise Exception(f"Image processing error: {str(e)}")
+
+    async def _generate_summary(self, text: str) -> str:
+        return f"{text[:200]}..."
+
+    def get_relevant_context(self, query: str, num_chunks: int = 3) -> str:
+        """Get relevant context from vector store"""
+        try:
+            if self.vector_store is None or not query.strip():
+                return ""
+            results = self.vector_store.similarity_search(query, k=num_chunks)
+            return "\n\n".join([doc.page_content for doc in results])
+        except Exception as e:
+            st.error(f"Error retrieving context: {str(e)}")
+            return ""
+
+class HealthcareAgent:
+    """Healthcare agent with improved response handling"""
+    def __init__(self):
+        self.llm = ChatGroq(
+            temperature=0.3,
+            model_name="llama-3.1-8b-instant",
+            groq_api_key=os.getenv("GROQ_API_KEY")
+        )
+        self.chat_history = []
+        self.doc_processor = DocumentProcessor()
+        self._initialize_prompts()
+        self.agents = self._initialize_agents()
+
+    def _initialize_prompts(self):
+        """Initialize concise agent prompts"""
+        self.prompts = {
+            'main_agent': """You are a healthcare coordinator AI. Be concise and direct. For simple greetings or non-medical queries, respond briefly and naturally.
+For medical queries, analyze the context and query to determine if specialist consultation is needed.
+
+Context: {context}
+Query: {query}
+Chat History: {chat_history}
+
+Respond appropriately to the query type:
+1. For greetings/simple queries: Give a brief, friendly response
+2. For medical queries: Provide a concise initial assessment and determine if specialist input is needed""",
+
+            'synthesis_agent': """You are a medical information synthesizer. Keep responses focused and concise.
+Context: {context}
+Query: {query}
+Chat History: {chat_history}
+Agent Responses: {agent_responses}
+
+Provide a clear, concise response that:
+1. Addresses the query directly
+2. Includes only relevant information
+3. Uses simple language
+4. Maintains appropriate length for query complexity"""
+        }
+
+        # Add other specialist agent prompts similarly...
+
+    def _initialize_agents(self):
+        return {
+            name: ChatPromptTemplate.from_messages([
+                ("system", prompt),
+                ("human", "{input}")
+            ]) | self.llm | StrOutputParser()
+            for name, prompt in self.prompts.items()
+        }
+
+    def _format_chat_history(self) -> str:
+        formatted = []
+        for msg in self.chat_history[-3:]:  # Last 3 messages only
+            role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+            formatted.append(f"{role}: {msg.content}")
+        return "\n".join(formatted)
+
+    async def process_query(self, query: str, status_callback) -> Dict[str, AgentResponse]:
+        """Process query with improved response handling"""
+        try:
+            # For simple greetings or non-medical queries, use main agent only
+            if self._is_simple_query(query):
+                response = await self._get_agent_response(
+                    'main_agent',
+                    query,
+                    "",  # No context needed for simple queries
+                    self._format_chat_history()
+                )
+                return {'main_agent': response}
+
+            # For medical queries, use full agent system
+            context = self.doc_processor.get_relevant_context(query)
+            responses = await self._process_medical_query(query, context, status_callback)
+            return responses
+
+        except Exception as e:
+            status_callback('main_agent', 'error', 0, str(e))
+            raise
+
+    def _is_simple_query(self, query: str) -> bool:
+        """Determine if query is a simple greeting or non-medical query"""
+        simple_patterns = [
+            'hi', 'hello', 'hey', 'good morning', 'good afternoon', 
+            'good evening', 'how are you', 'thanks', 'thank you'
+        ]
+        return any(query.lower().strip().startswith(pattern) for pattern in simple_patterns)
+
+    async def _process_medical_query(self, query: str, context: str, status_callback) -> Dict[str, AgentResponse]:
+        """Process medical queries with full agent system"""
+        responses = {}
+        chat_history = self._format_chat_history()
+
+        # Get main agent response
+        status_callback('main_agent', 'working', 0.2, "Analyzing query")
+        main_response = await self._get_agent_response(
+            'main_agent',
+            query,
+            context,
+            chat_history
+        )
+        responses['main_agent'] = main_response
+
+        # Process through specialist agents if needed
+        if self._needs_specialist_consultation(main_response.content):
+            specialist_responses = await self._get_specialist_responses(
+                query,
+                context,
+                chat_history,
+                status_callback
+            )
+            responses.update(specialist_responses)
+
+        # Synthesize final response
+        status_callback('synthesis_agent', 'working', 0.8, "Creating final response")
+        final_response = await self._synthesize_responses(
+            query,
+            context,
+            chat_history,
+            responses
+        )
+        responses['synthesis_agent'] = final_response
+
+        return responses
+
+    def _needs_specialist_consultation(self, main_response: str) -> bool:
+        """Determine if specialist consultation is needed based on main agent response"""
+        medical_indicators = [
+            'symptom', 'condition', 'treatment', 'diagnosis', 'medical',
+            'health', 'pain', 'doctor', 'medicine', 'disease'
+        ]
+        return any(indicator in main_response.lower() for indicator in medical_indicators)
+
+
+
+class HealthcareAgent:
+    """Enhanced healthcare agent with simplified document storage"""
+    def __init__(self):
+        self.llm = ChatGroq(
+            temperature=0.3,
+            model_name="llama-3.1-8b-instant",
+            groq_api_key=os.getenv("GROQ_API_KEY")
+        )
+        self.chat_history = []
+        self.doc_processor = DocumentProcessor()
+        self._initialize_prompts()
+        self.agents = self._initialize_agents()
+
+    def _initialize_prompts(self):
+        """Initialize enhanced agent prompts"""
+        self.prompts = {
+            'main_agent': """You are a healthcare coordinator AI. Analyze the following:
+Context: {context}
+Query: {query}
+Chat History: {chat_history}
+
+Your task:
+1. Understand the main medical query
+2. Identify key medical concepts
+3. Determine which specialist agents to consult
+4. Create a structured analysis plan
+
+Provide a detailed response including:
+1. Query understanding
+2. Key medical concepts identified
+3. Suggested specialist consultations
+4. Initial assessment
+5. Questions for clarification (if needed)""",
+
+            'diagnosis_agent': """You are a medical diagnosis specialist. Analyze:
+Context: {context}
+Query: {query}
+Chat History: {chat_history}
+
+Focus on:
+1. Symptom analysis
+2. Potential conditions
+3. Risk assessment
+4. Diagnostic considerations
+5. Medical history relevance
+
+Provide a structured response with:
+1. Detailed symptom analysis
+2. Differential diagnosis
+3. Risk factors identified
+4. Recommended diagnostic steps
+5. Urgency assessment""",
+
+            'treatment_agent': """You are a treatment specialist. Consider:
+Context: {context}
+Query: {query}
+Chat History: {chat_history}
+
+Analyze:
+1. Treatment options
+2. Evidence-based approaches
+3. Risk-benefit analysis
+4. Treatment timeline
+5. Monitoring requirements
+
+Provide recommendations for:
+1. Immediate steps
+2. Treatment options
+3. Lifestyle modifications
+4. Follow-up care
+5. Warning signs to watch""",
+
+            'research_agent': """You are a medical research specialist. Research:
+Context: {context}
+Query: {query}
+Chat History: {chat_history}
+
+Focus on:
+1. Recent research findings
+2. Clinical guidelines
+3. Treatment effectiveness
+4. Safety considerations
+5. Emerging approaches
+
+Provide analysis of:
+1. Current medical evidence
+2. Research quality
+3. Clinical applications
+4. Future directions
+5. Knowledge gaps""",
+
+            'synthesis_agent': """You are a medical information synthesizer. Integrate:
+Context: {context}
+Query: {query}
+Chat History: {chat_history}
+Agent Responses: {agent_responses}
+
+Create a comprehensive response:
+1. Summarize key findings
+2. Integrate specialist insights
+3. Provide clear recommendations
+4. Address uncertainties
+5. Suggest next steps
+
+Ensure the response is:
+1. Clear and actionable
+2. Evidence-based
+3. Patient-centered
+4. Safety-conscious
+5. Well-structured"""
+        }
+
+    def _initialize_agents(self):
+        """Initialize enhanced agent system"""
+        return {
+            name: ChatPromptTemplate.from_messages([
+                ("system", prompt),
+                ("human", "{input}")
+            ]) | self.llm | StrOutputParser()
+            for name, prompt in self.prompts.items()
+        }
+
+    def _format_chat_history(self) -> str:
+        """Format chat history for context"""
+        formatted = []
+        for msg in self.chat_history[-5:]:  # Last 5 messages
+            role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+            formatted.append(f"{role}: {msg.content}")
+        return "\n".join(formatted)
+
+    async def process_documents(self, files, status_callback) -> bool:
+        """Process documents with detailed status updates"""
+        try:
+            processed_docs = []
+            
+            for idx, file in enumerate(files):
+                doc = await self.doc_processor.process_file(
+                    file,
+                    lambda p, m: status_callback(
+                        'document_processor',
+                        'working',
+                        (idx / len(files)) + (p / len(files)),
+                        m
+                    )
+                )
+                if doc:
+                    processed_docs.append(doc)
+
+            if processed_docs:
+                success = await self.doc_processor.update_document_store(
+                    processed_docs,
+                    lambda p, m: status_callback(
+                        'document_processor',
+                        'working',
+                        0.8 + (p * 0.2),
+                        m
+                    )
+                )
                 
-                # Add location information to message
-                alert_message += (
-                    f"📍 Location Coordinates: {lat}, {lon}\n"
-                    f"🗺️ Google Maps: {maps_link}\n"
+                if success:
+                    status_callback(
+                        'document_processor',
+                        'completed',
+                        1.0,
+                        "Documents processed successfully"
+                    )
+                    return True
+
+            status_callback(
+                'document_processor',
+                'error',
+                0,
+                "Document processing failed"
+            )
+            return False
+            
+        except Exception as e:
+            status_callback(
+                'document_processor',
+                'error',
+                0,
+                str(e)
+            )
+            return False
+
+    async def get_relevant_context(self, query: str) -> str:
+        """Get relevant context using simple keyword search"""
+        try:
+            relevant_docs = self.doc_processor.doc_store.search(query, k=3)
+            return "\n\n".join(relevant_docs)
+        except Exception as e:
+            print(f"Error retrieving context: {str(e)}")
+            return ""
+
+    async def process_query(
+        self,
+        query: str,
+        status_callback
+    ) -> Dict[str, AgentResponse]:
+        """Process query through multi-agent system"""
+        responses = {}
+        context = await self.get_relevant_context(query)
+        chat_history = self._format_chat_history()
+        
+        try:
+            # Process through main agent
+            status_callback('main_agent', 'working', 0.2, "Analyzing query")
+            main_response = await self._get_agent_response(
+                'main_agent',
+                query,
+                context,
+                chat_history
+            )
+            responses['main_agent'] = main_response
+            status_callback('main_agent', 'completed', 1.0, "Analysis complete")
+
+            # Process through specialist agents in parallel
+            status_callback('diagnosis_agent', 'working', 0.2, "Analyzing symptoms")
+            status_callback('treatment_agent', 'working', 0.2, "Evaluating treatments")
+            status_callback('research_agent', 'working', 0.2, "Reviewing research")
+
+            specialist_tasks = [
+                self._get_agent_response('diagnosis_agent', query, context, chat_history),
+                self._get_agent_response('treatment_agent', query, context, chat_history),
+                self._get_agent_response('research_agent', query, context, chat_history)
+            ]
+
+            specialist_responses = await asyncio.gather(*specialist_tasks)
+            
+            # Update responses and status for each specialist agent
+            for agent_name, response in zip(
+                ['diagnosis_agent', 'treatment_agent', 'research_agent'],
+                specialist_responses
+            ):
+                responses[agent_name] = response
+                status_callback(
+                    agent_name,
+                    'completed',
+                    1.0,
+                    f"{agent_name.split('_')[0].title()} analysis complete"
                 )
 
-                # Try to get address from coordinates using Nominatim
-                try:
-                    geolocator = Nominatim(user_agent="emergency_app")
-                    location = geolocator.reverse(f"{lat}, {lon}")
-                    if location and location.address:
-                        alert_message += f"📌 Reverse Geocoded Address: {location.address}\n"
-                except Exception as geo_error:
-                    logger.error(f"Geocoding error: {geo_error}")
-                    
-            except Exception as loc_error:
-                logger.error(f"Location parsing error: {loc_error}")
-                alert_message += f"📍 Location (raw): {emergency_details['current_location']}\n"
+            # Synthesize final response
+            status_callback('synthesis_agent', 'working', 0.5, "Synthesizing insights")
+            final_response = await self._synthesize_responses(
+                query,
+                context,
+                chat_history,
+                responses
+            )
+            responses['synthesis_agent'] = final_response
+            status_callback(
+                'synthesis_agent',
+                'completed',
+                1.0,
+                "Response synthesis complete"
+            )
 
-        if emergency_details.get('text_address'):
-            alert_message += f"🏠 Provided Address: {emergency_details['text_address']}\n"
-            # Try to get coordinates for the text address
-            try:
-                geolocator = Nominatim(user_agent="emergency_app")
-                location = geolocator.geocode(emergency_details['text_address'])
-                if location:
-                    maps_link = f"https://www.google.com/maps?q={location.latitude},{location.longitude}"
-                    alert_message += f"🗺️ Address Google Maps: {maps_link}\n"
-            except Exception as geo_error:
-                logger.error(f"Address geocoding error: {geo_error}")
+            # Update chat history
+            self.chat_history.extend([
+                HumanMessage(content=query),
+                AIMessage(content=final_response.content)
+            ])
 
-        # Send text message
-        message_data = {
-            "chat_id": ADMIN_CHAT_ID,
-            "text": alert_message,
-            "parse_mode": "HTML"
-        }
-        requests.post(f"{base_url}/sendMessage", json=message_data)
+            return responses
 
-        # Send photos if any
-        if uploaded_files:
-            for file in uploaded_files:
-                files = {"photo": file.getvalue()}
-                photo_data = {
-                    "chat_id": ADMIN_CHAT_ID,
-                    "caption": "Emergency situation photo"
-                }
-                requests.post(f"{base_url}/sendPhoto", data=photo_data, files=files)
+        except Exception as e:
+            # Update status for all agents to error state
+            for agent in self.agents.keys():
+                status_callback(agent, 'error', 0, str(e))
+            raise Exception(f"Query processing error: {str(e)}")
 
-        return True
-    except Exception as e:
-        logger.error(f"Failed to send emergency alert: {e}")
-        return False
+    async def _get_agent_response(
+        self,
+        agent_name: str,
+        query: str,
+        context: str,
+        chat_history: str
+    ) -> AgentResponse:
+        """Get response from specific agent with metadata"""
+        start_time = time.time()
+        
+        try:
+            response = await self.agents[agent_name].ainvoke({
+                "input": query,
+                "context": context,
+                "query": query,
+                "chat_history": chat_history
+            })
+            
+            processing_time = time.time() - start_time
+            
+            metadata = {
+                "processing_time": processing_time,
+                "context_length": len(context),
+                "query_length": len(query)
+            }
+            
+            return AgentResponse(
+                agent_name=agent_name,
+                content=response,
+                confidence=0.85,  # You could implement confidence scoring
+                metadata=metadata,
+                processing_time=processing_time
+            )
+            
+        except Exception as e:
+            raise Exception(f"Agent {agent_name} error: {str(e)}")
 
-def custom_card(title, content=None, color="#FF4B4B"):
-    st.markdown(
-        f"""
-        <div style="
-            padding: 20px;
-            border-radius: 10px;
-            margin: 10px 0;
-            background-color: white;
-            border-left: 5px solid {color};
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <h3 style="color: {color}; margin-top: 0;">{title}</h3>
-            {f'<p style="color: #000000; margin-bottom: 0;">{content}</p>' if content else ''}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    async def _synthesize_responses(
+        self,
+        query: str,
+        context: str,
+        chat_history: str,
+        responses: Dict[str, AgentResponse]
+    ) -> AgentResponse:
+        """Synthesize final response from all agent responses"""
+        try:
+            # Format agent responses for synthesis
+            formatted_responses = "\n\n".join([
+                f"{name.upper()}:\n{response.content}"
+                for name, response in responses.items()
+                if name != 'synthesis_agent'
+            ])
 
-def initialize_session_state():
-    """Initialize session state variables"""
-    if 'step' not in st.session_state:
-        st.session_state.step = 'platform_choice'
-    if 'platform' not in st.session_state:
-        st.session_state.platform = None
-    if 'emergency_type' not in st.session_state:
-        st.session_state.emergency_type = None
-    if 'current_location' not in st.session_state:
-        st.session_state.current_location = None
-    if 'text_address' not in st.session_state:
-        st.session_state.text_address = None
-    if 'location_choice' not in st.session_state:
-        st.session_state.location_choice = None
-    if 'photos' not in st.session_state:
-        st.session_state.photos = []
-    if 'alert_sent' not in st.session_state:
-        st.session_state.alert_sent = False
-    if 'emergency_status' not in st.session_state:
-        st.session_state.emergency_status = None
+            start_time = time.time()
+            
+            synthesis_response = await self.agents['synthesis_agent'].ainvoke({
+                "input": query,
+                "context": context,
+                "query": query,
+                "chat_history": chat_history,
+                "agent_responses": formatted_responses
+            })
+            
+            processing_time = time.time() - start_time
+            
+            metadata = {
+                "processing_time": processing_time,
+                "source_responses": len(responses),
+                "context_used": bool(context)
+            }
+            
+            return AgentResponse(
+                agent_name="synthesis_agent",
+                content=synthesis_response,
+                confidence=0.9,
+                metadata=metadata,
+                processing_time=processing_time
+            )
 
-def get_estimated_time():
-    """Return a random estimated arrival time between 5-15 minutes"""
-    from random import randint
-    return randint(5, 15)
+        except Exception as e:
+            raise Exception(f"Synthesis error: {str(e)}")
 
-def main():
+
+def setup_streamlit_ui():
+    """Setup enhanced Streamlit UI with dark sidebar"""
     st.set_page_config(
-        page_title="Emergency Assistance",
-        page_icon="🚑",
-        layout="centered",
-        initial_sidebar_state="collapsed"
+        page_title="Healthcare AI Assistant",
+        page_icon="🏥",
+        layout="wide"
     )
-
-    # Initialize session state
-    initialize_session_state()
-
-    # Custom CSS
+    
     st.markdown("""
         <style>
         .main {
-            padding: 2rem;
-            max-width: 900px;
+            background-color: #f8f9fa;
+        }
+        .stApp {
+            max-width: 1200px;
             margin: 0 auto;
         }
-        .stButton button {
-            width: 100%;
-            border-radius: 20px;
-            height: 3em;
-            font-weight: 600;
+        .chat-message {
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            border: 1px solid #dee2e6;
+            background-color: black;
         }
-        .emergency-title {
-            color: #FF4B4B;
+        .chat-message.user {
+            border-left: 4px solid #007bff;
+        }
+        .chat-message.assistant {
+            border-left: 4px solid #28a745;
+        }
+        .agent-card {
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            border: 1px solid #dee2e6;
+            background-color: black;
+        }
+        .metadata-section {
+            font-size: 0.8rem;
+            color: #6c757d;
+            border-top: 1px solid #dee2e6;
+            margin-top: 1rem;
+            padding-top: 0.5rem;
+        }
+        .file-uploader {
+            border: 2px dashed #4A4A4A;
+            border-radius: 0.5rem;
+            padding: 1rem;
             text-align: center;
-            margin-bottom: 2em;
+            background-color: #1E1E1E;
+            margin-bottom: 1rem;
+            color: #FFFFFF;
+        }
+        .file-uploader:hover {
+            border-color: #007bff;
+            background-color: #2D2D2D;
+        }
+        [data-testid="stSidebar"] {
+            background-color: #121212;
+        }
+        [data-testid="stSidebar"] > div:first-child {
+            background-color: #121212;
+        }
+        .sidebar .sidebar-content {
+            background-color: #121212;
+        }
+        .stButton>button {
+            background-color: #007bff;
+            color: black;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.3rem;
+            width: 100%;
+        }
+        .stButton>button:hover {
+            background-color: #0056b3;
+        }
+        .uploaded-file {
+            background-color: #1E1E1E;
+            padding: 0.8rem;
+            border-radius: 0.5rem;
+            margin-bottom: 0.8rem;
+            border: 1px solid #4A4A4A;
+            color: #FFFFFF;
         }
         </style>
     """, unsafe_allow_html=True)
 
-    if not st.session_state.alert_sent:
-        st.markdown('<h1 class="emergency-title">🚑 Emergency Assistance</h1>', unsafe_allow_html=True)
-
-        if st.session_state.step == 'platform_choice':
-            custom_card("Choose how you'd like to continue", color="#1E88E5")
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("Continue Here", use_container_width=True):
-                    st.session_state.platform = "streamlit"
-                    st.session_state.step = 'emergency_type'
-                    st.rerun()
-            with col2:
-                if st.button("Open in Telegram", use_container_width=True):
-                    bot_username = "EmergencyEagleBot"
-                    telegram_url = f"https://t.me/{bot_username}"
-                    st.markdown(f"[Open Telegram Bot]({telegram_url})")
-                    st.stop()
-
-        elif st.session_state.step == 'emergency_type':
-            custom_card("Select Emergency Type", color="#FF4B4B")
-            emergency_options = {
-                "Medical Emergency": "🏥",
-                "Accident": "🚗",
-                "Heart/Chest Pain": "❤️",
-                "Pregnancy": "👶"
-            }
-            
-            cols = st.columns(2)
-            for i, (option, emoji) in enumerate(emergency_options.items()):
-                with cols[i % 2]:
-                    if st.button(f"{emoji} {option}", use_container_width=True):
-                        st.session_state.emergency_type = option
-                        st.session_state.step = 'location_choice'
-                        st.rerun()
-
-        elif st.session_state.step == 'location_choice':
-            custom_card("Share Your Location", color="#4CAF50")
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("📍 Share Location", use_container_width=True):
-                    st.session_state.location_choice = "location"
-                    st.session_state.step = 'current_location'
-                    st.rerun()
-                
-            with col2:
-                if st.button("✍️ Enter Address", use_container_width=True):
-                    st.session_state.location_choice = "address"
-                    st.session_state.step = 'text_address'
-                    st.rerun()
-
-        elif st.session_state.step == 'current_location':
-            custom_card("Select Your Location on the Map", color="#4CAF50")
-            # Display the map with a folium map to select location
-            map_center = [20.5937, 78.9629]  # Example center location
-            m = folium.Map(location=map_center, zoom_start=5)
-            map_data = st_folium(m, width=700, height=500)
-
-            if map_data["last_clicked"]:
-                latitude, longitude = map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]
-                st.session_state.current_location = {"latitude": latitude, "longitude": longitude}
-                st.session_state.step = 'photos'
-                st.success(f"Location captured: {latitude}, {longitude}")
-                st.rerun()
-
-        elif st.session_state.step == 'text_address':
-            custom_card("Enter Your Address", color="#4CAF50")
-            text_address = st.text_area("Complete Address")
-            if st.button("Continue", use_container_width=True):
-                if text_address:
-                    st.session_state.text_address = text_address
-                    st.session_state.step = 'photos'
-                    st.rerun()
-                else:
-                    st.error("Please enter your address")
-
-        elif st.session_state.step == 'photos':
-            custom_card("Upload Photos (Optional)", color="#9C27B0")
-            uploaded_files = st.file_uploader(
-                "Upload photos of the emergency situation",
-                type=["jpg", "jpeg", "png"],
-                accept_multiple_files=True
-            )
-            if st.button("Send Emergency Alert", use_container_width=True):
-                st.session_state.photos = uploaded_files
-                st.session_state.step = 'summary'
-                st.rerun()
-
-        elif st.session_state.step == 'summary':
-            emergency_details = {
-                'type': st.session_state.emergency_type,
-                'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'current_location': st.session_state.current_location,
-                'text_address': st.session_state.text_address
-            }
-
-            with st.spinner("Dispatching Emergency Services..."):
-                if send_emergency_alert_to_admin(emergency_details, st.session_state.photos):
-                    st.session_state.alert_sent = True
-                    st.session_state.emergency_status = "en_route"
-                    estimated_time = get_estimated_time()
-                    st.session_state.estimated_time = estimated_time
-                    st.rerun()
-                else:
-                    st.error("Failed to send alert. Please try again.")
-
-    else:
-        # Emergency services dispatched view
-        st.markdown('<h1 class="emergency-title">Emergency Services En Route</h1>', unsafe_allow_html=True)
+def main():
+    """Main application with dark sidebar and enhanced UI"""
+    setup_streamlit_ui()
+    
+    # Initialize session state
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    if "agent" not in st.session_state:
+        st.session_state.agent = HealthcareAgent()
+    if "agent_status" not in st.session_state:
+        st.session_state.agent_status = AgentStatus()
+    if "documents_processed" not in st.session_state:
+        st.session_state.documents_processed = False
+    
+    # Sidebar content
+    with st.sidebar:
+        # Document Processing Section First
+        st.markdown('<h3 style="color: #FFFFFF;">📋 Document Processing</h3>', unsafe_allow_html=True)
         
-        custom_card(
-            "🚑 Help is on the way!",
-            f"Estimated arrival time: {st.session_state.estimated_time} minutes",
-            "#4CAF50"
+        # Clean single file upload interface
+        uploaded_files = st.file_uploader(
+            "Upload PDF or Image files",
+            type=['pdf', 'png', 'jpg', 'jpeg'],
+            accept_multiple_files=True,
+            key="document_uploader"
         )
-
-        custom_card(
-            "📝 Important Instructions",
-            """
-            • Stay calm and remain in your current location
-            • Keep your phone nearby
-            • Gather any relevant medical documents
-            • Clear the path for emergency responders
-            • If possible, have someone wait outside to guide the team
-            """,
-            "#1E88E5"
-        )
-
-        custom_card(
-            "🆘 Emergency Contact",
-            "If your condition worsens or you need immediate assistance, call 911",
-            "#FF4B4B"
-        )
-
-        # Reset button (bottom of page)
-        if st.button("Start New Emergency Request", use_container_width=True):
-            for key in st.session_state.keys():
-                del st.session_state[key]
-            st.rerun()
-
+        
+        if uploaded_files:
+            st.markdown('<h4 style="color: #FFFFFF;">📎 Selected Files</h4>', unsafe_allow_html=True)
+            for file in uploaded_files:
+                st.markdown(f"""
+                    <div class="uploaded-file">
+                        <div style="color: #FFFFFF;">📄 {file.name}</div>
+                        <div style="color: #CCCCCC; font-size: 0.8rem; margin-top: 0.5rem;">
+                            Type: {file.type}
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
+            
+            if st.button("🔄 Process Documents", key="process_docs"):
+                with st.spinner("Processing documents..."):
+                    async def process_docs():
+                        await st.session_state.agent.process_documents(
+                            uploaded_files,
+                            st.session_state.agent_status.update_status
+                        )
+                        st.session_state.documents_processed = True
+                    
+                    asyncio.run(process_docs())
+                    
+        st.markdown('<h3 style="color: #FFFFFF;">🤖 Agent Status</h3>', unsafe_allow_html=True)
+        # Initialize agent status sidebar after file upload section
+        st.session_state.agent_status.initialize_sidebar_placeholder()
+    
+    # Main content area
+    st.title("🏥 Healthcare AI Assistant")
+    st.markdown("""
+        Your intelligent medical assistant for document analysis and healthcare queries.
+        Upload documents in the sidebar and ask questions below.
+    """)
+    
+    # Chat interface
+    st.markdown("### 💬 Chat Interface")
+    
+    # Display chat history
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            if isinstance(message["content"], dict):
+                # Display synthesized response
+                st.markdown(f"""
+                    <div class="chat-message {message['role']}">
+                        {message['content']['synthesis_agent'].content}
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                # Show detailed agent responses in expander
+                with st.expander("🔍 Detailed Agent Responses", expanded=False):
+                    for agent_name, response in message['content'].items():
+                        if agent_name != 'synthesis_agent':
+                            st.markdown(f"""
+                                <div class="agent-card">
+                                    <strong>{agent_name.replace('_', ' ').title()}</strong>
+                                    <div style="margin: 0.5rem 0;">
+                                        {response.content}
+                                    </div>
+                                    <div class="metadata-section">
+                                        Processing time: {response.processing_time:.2f}s
+                                    </div>
+                                </div>
+                            """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                    <div class="chat-message {message['role']}">
+                        {message['content']}
+                    </div>
+                """, unsafe_allow_html=True)
+    
+    # Chat input
+    if prompt := st.chat_input("Ask me about your health concerns..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        
+        with st.chat_message("assistant"):
+            response_placeholder = st.empty()
+            
+            try:
+                async def process_query():
+                    return await st.session_state.agent.process_query(
+                        prompt,
+                        st.session_state.agent_status.update_status
+                    )
+                
+                responses = asyncio.run(process_query())
+                
+                if responses:
+                    response_placeholder.markdown(f"""
+                        <div class="chat-message assistant">
+                            {responses['synthesis_agent'].content}
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": responses
+                    })
+                
+            except Exception as e:
+                response_placeholder.error(f"An error occurred: {str(e)}")
+                
 if __name__ == "__main__":
     main()
