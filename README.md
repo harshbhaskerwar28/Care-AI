@@ -83,10 +83,6 @@ Every module is crafted with specialized tools and agents to bring healthcare cl
 
 ---
 
-Here’s how you can add a dedicated section for seeing the deployed project, with a column format for better clarity:
-
----
-
 ## 🌐 **See the Deployed Project**
 
 [CareAI](https://careai28.netlify.app/)
