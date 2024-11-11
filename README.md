@@ -87,9 +87,5 @@ Every module is crafted with specialized tools and agents to bring healthcare cl
 
 [CareAI](https://careai28.netlify.app/)
 
----
-
-This format allows you to add links to the live demo for each feature directly in the table.
-
 
 Explore **The Care AI** and take control of your health journey, one step at a time!
