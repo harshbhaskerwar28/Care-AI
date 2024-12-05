@@ -79,9 +79,9 @@ Every module is crafted with specialized tools and agents to bring healthcare cl
 
 ## 📄 **License**
 
-> Licensed under the MIT License. See the LICENSE file for more details.
+Licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
 
----
+
 
 ## 🌐 **See the Deployed Project**
 
