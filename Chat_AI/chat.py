@@ -4,6 +4,8 @@ import asyncio
 import aiohttp
 from typing import Dict, List, Optional, Union
 from dataclasses import dataclass
+from langchain.cache import InMemoryCache
+import langchain
 import pytesseract
 from PIL import Image
 from PyPDF2 import PdfReader
