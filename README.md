@@ -1,4 +1,4 @@
-# 🌟 **The Care AI: Your Future-Ready Healthcare Companion** 🚀
+# 🌟 **The CareAI: Your Future-Ready Healthcare Companion** 🚀
 
 Welcome to **The Care AI** – where cutting-edge technology meets healthcare to provide a smart, user-friendly, and interactive health management experience. From disease prediction to emergency support, we've got your health covered!
 
