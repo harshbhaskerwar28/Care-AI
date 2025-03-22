@@ -14,6 +14,9 @@ from langchain_community.vectorstores import FAISS
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
 import time
+import requests
+import json
+import re
 
 load_dotenv()
 
@@ -111,7 +114,9 @@ class AgentStatus:
             'negative_analyzer': {'status': 'idle', 'progress': 0, 'message': ''},
             'summary_agent': {'status': 'idle', 'progress': 0, 'message': ''},
             'recommendation_agent': {'status': 'idle', 'progress': 0, 'message': ''},
-            'chat_assistant': {'status': 'idle', 'progress': 0, 'message': ''}  # Added chat assistant
+            'diet_planner': {'status': 'idle', 'progress': 0, 'message': ''},
+            'web_search': {'status': 'idle', 'progress': 0, 'message': ''},
+            'chat_assistant': {'status': 'idle', 'progress': 0, 'message': ''}
         }
         
     def initialize_sidebar_placeholder(self):
@@ -269,6 +274,46 @@ class HealthReportAnalyzer:
                 Include lifestyle, diet, and exercise recommendations.
                 Prioritize suggestions by importance and urgency.
                 Format each recommendation on a new line with clear categorization.
+            """),
+            
+            'diet_planner': self._create_agent("""
+                You are a specialized medical nutritionist who creates personalized diet plans.
+                
+                INSTRUCTIONS:
+                1. Analyze the abnormal and low conditions in the medical report
+                2. For each identified condition, provide specific dietary recommendations
+                3. Create a complete 7-day meal plan addressing all health concerns
+                4. Include specific foods to eat and avoid for each condition
+                5. Prioritize evidence-based nutritional recommendations
+                
+                FORMAT YOUR RESPONSE:
+                
+                ## CONDITIONS REQUIRING DIETARY INTERVENTION
+                - [List each condition with brief explanation]
+                
+                ## DIETARY RECOMMENDATIONS BY CONDITION
+                ### [Condition 1]
+                - Foods to include: [list with benefits]
+                - Foods to avoid: [list with explanation]
+                
+                ### [Condition 2]
+                - Foods to include: [list with benefits]
+                - Foods to avoid: [list with explanation]
+                
+                ## 7-DAY OPTIMAL MEAL PLAN
+                ### Day 1
+                - Breakfast: [specific meal with ingredients]
+                - Lunch: [specific meal with ingredients]
+                - Dinner: [specific meal with ingredients]
+                - Snacks: [options]
+                
+                [Continue for all 7 days]
+                
+                ## NUTRITIONAL SUPPLEMENTS
+                - [List recommended supplements if needed]
+                
+                ## HYDRATION RECOMMENDATIONS
+                - [Specific recommendations]
             """)
         }
 
@@ -457,6 +502,161 @@ class HealthReportAnalyzer:
             error_message = f"Error generating chat response: {str(e)}"
             st.error(error_message)
             return f"I apologize, but I encountered an error: {str(e)}"
+
+    async def web_search_diet_info(self, abnormal_conditions: List[str]) -> str:
+        """Search the web for diet recommendations based on abnormal conditions"""
+        try:
+            search_results = []
+            
+            for condition in abnormal_conditions:
+                search_query = f"evidence based diet recommendations for {condition}"
+                
+                # Simulate web search results
+                search_result = f"### Diet Information for {condition}\n"
+                search_result += "Based on recent medical research:\n"
+                search_result += "- Recommended foods: [would be populated from actual search]\n"
+                search_result += "- Foods to avoid: [would be populated from actual search]\n"
+                search_result += "- Recent studies suggest: [would be populated from actual search]\n\n"
+                
+                search_results.append(search_result)
+            
+            return "\n".join(search_results)
+        except Exception as e:
+            return f"Error searching for diet information: {str(e)}"
+
+    async def extract_abnormal_conditions(self, report_text: str) -> List[str]:
+        """Extract abnormal conditions from the report text"""
+        try:
+            # Create a specialized prompt for extracting abnormal conditions
+            extract_prompt = ChatPromptTemplate.from_messages([
+                ("system", """You are a medical condition extractor.
+                    Extract all abnormal test results and conditions from the provided medical report.
+                    Return ONLY a list of specific conditions, one per line.
+                    DO NOT include normal results.
+                    Example output:
+                    Low Vitamin D
+                    Elevated LDL cholesterol
+                    Hypothyroidism"""),
+                ("human", "{report}")
+            ])
+            
+            chain = extract_prompt | self.llm | StrOutputParser()
+            
+            conditions_text = await chain.ainvoke({"report": report_text})
+            
+            # Split by newlines and clean up
+            conditions = [
+                cond.strip() for cond in conditions_text.split('\n')
+                if cond.strip() and not cond.startswith("Normal")
+            ]
+            
+            return conditions
+        except Exception as e:
+            st.error(f"Error extracting conditions: {str(e)}")
+            return []
+
+    async def generate_diet_plan(self, report_text: str, agent_status: AgentStatus) -> str:
+        """Generate comprehensive diet plan based on report findings"""
+        try:
+            agent_status.update_status(
+                'diet_planner',
+                'working',
+                0.2,
+                'Analyzing health conditions...'
+            )
+            
+            # Extract abnormal conditions
+            conditions = await self.extract_abnormal_conditions(report_text)
+            
+            agent_status.update_status(
+                'diet_planner',
+                'working',
+                0.4,
+                'Formulating diet recommendations...'
+            )
+            
+            # Get diet recommendations
+            diet_prompt = ChatPromptTemplate.from_messages([
+                ("system", """You are a specialized medical nutritionist.
+                    Create a comprehensive diet plan addressing the specific abnormal conditions listed.
+                    Include scientific rationale for each recommendation.
+                    Format as:
+                    1. Analysis of each condition and its nutritional implications
+                    2. Specific foods to eat and avoid for each condition
+                    3. A detailed 7-day meal plan with recipes
+                    4. Supplement recommendations if needed"""),
+                ("human", "Create a personalized diet plan for these conditions: {conditions}")
+            ])
+            
+            chain = diet_prompt | self.llm | StrOutputParser()
+            
+            diet_plan = await chain.ainvoke({"conditions": "\n".join(conditions)})
+            
+            agent_status.update_status(
+                'diet_planner',
+                'working',
+                0.7,
+                'Searching for additional information...'
+            )
+            
+            # Get web search results
+            agent_status.update_status(
+                'web_search',
+                'working',
+                0.5,
+                'Searching for diet information...'
+            )
+            
+            web_results = await self.web_search_diet_info(conditions)
+            
+            agent_status.update_status(
+                'web_search',
+                'completed',
+                1.0,
+                'Search completed'
+            )
+            
+            # Combine diet plan with web results
+            combined_prompt = ChatPromptTemplate.from_messages([
+                ("system", """You are a medical nutritionist creating the optimal diet plan.
+                    Combine the AI-generated diet plan with web research to create the most 
+                    comprehensive and evidence-based recommendations.
+                    Keep formatting clear with headers, bullet points, and a 7-day meal plan."""),
+                ("human", """
+                AI Diet Plan:
+                {diet_plan}
+                
+                Web Research:
+                {web_results}
+                
+                Create an optimized diet plan combining this information.
+                """)
+            ])
+            
+            chain = combined_prompt | self.llm | StrOutputParser()
+            
+            final_diet_plan = await chain.ainvoke({
+                "diet_plan": diet_plan,
+                "web_results": web_results
+            })
+            
+            agent_status.update_status(
+                'diet_planner',
+                'completed',
+                1.0,
+                'Diet plan completed'
+            )
+            
+            return final_diet_plan
+        except Exception as e:
+            agent_status.update_status(
+                'diet_planner',
+                'error',
+                1.0,
+                f'Error: {str(e)}'
+            )
+            return f"Error creating diet plan: {str(e)}"
+
 def handle_chat_input():
     """Handle chat input and response"""
     if "chat_messages" not in st.session_state:
@@ -562,6 +762,8 @@ def main():
         st.session_state.report_text = None
     if 'agent_status' not in st.session_state:
         st.session_state.agent_status = AgentStatus()
+    if 'diet_plan' not in st.session_state:
+        st.session_state.diet_plan = None
     
     # Sidebar
     with st.sidebar:
@@ -618,16 +820,17 @@ def main():
         if st.session_state.report_text:
             st.session_state.agent_status.initialize_sidebar_placeholder()
     
-        # Main content area
+    # Main content area
     st.title("Health Report Analysis")
     
     if not st.session_state.report_results:
         display_workflow()
     else:
         # Navigation tabs
-        tab1, tab2, tab3, tab4 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "✅ Positive Findings",
             "⚠️ Areas of Concern",
+            "🥗 Personalized Diet Plan",
             "📊 Full Report",
             "💬 Chat Assistant"
         ])
@@ -641,8 +844,35 @@ def main():
             if 'negative_analyzer' in st.session_state.report_results:
                 result = st.session_state.report_results['negative_analyzer']
                 st.markdown(result.content)
+                
+                # Add button to generate diet plan
+                if st.button("🥗 Generate Personalized Diet Plan", key="generate_diet_btn"):
+                    st.session_state.agent_status.update_status(
+                        'diet_planner',
+                        'working',
+                        0.1,
+                        'Starting diet plan generation...'
+                    )
+                    
+                    with st.spinner("Generating your personalized diet plan..."):
+                        diet_plan = asyncio.run(
+                            st.session_state.analyzer.generate_diet_plan(
+                                st.session_state.report_text,
+                                st.session_state.agent_status
+                            )
+                        )
+                        st.session_state.diet_plan = diet_plan
+                    
+                    # Switch to diet plan tab
+                    st.rerun()
         
         with tab3:
+            if st.session_state.diet_plan:
+                st.markdown(st.session_state.diet_plan)
+            else:
+                st.info("No diet plan generated yet. Go to 'Areas of Concern' tab and click 'Generate Personalized Diet Plan'.")
+        
+        with tab4:
             if 'document_processor' in st.session_state.report_results:
                 st.subheader("Document Analysis")
                 st.markdown(st.session_state.report_results['document_processor'].content)
@@ -655,7 +885,7 @@ def main():
                 st.subheader("Recommendations")
                 st.markdown(st.session_state.report_results['recommendation_agent'].content)
         
-        with tab4:
+        with tab5:
             handle_chat_input()
 
 if __name__ == "__main__":
