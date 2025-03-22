@@ -258,6 +258,16 @@ class DietAgent:
             groq_api_key=os.getenv("GROQ_API_KEY")
         )
         self._initialize_prompt()
+        # Specialized diet plans for common conditions
+        self.specialized_diets = {
+            "kidney_stone": DietPlan(
+                breakfast="Low-oxalate cereal with milk",
+                lunch="Chicken with white rice",
+                dinner="Fish with steamed vegetables",
+                snacks="Yogurt or apple",
+                notes="Limit salt, drink plenty water"
+            )
+        }
 
     def _initialize_prompt(self):
         """Initialize diet agent prompt"""
@@ -284,6 +294,11 @@ Keep each suggestion under 5 words. Total response must be under 50 words."""
     async def generate_diet_plan(self, query: str, context: str, chat_history: str) -> DietPlan:
         """Generate a diet plan based on the conversation"""
         try:
+            # Check for specialized diet needs
+            query_lower = query.lower()
+            if "kidney" in query_lower and ("stone" in query_lower or "stones" in query_lower):
+                return self.specialized_diets["kidney_stone"]
+                
             start_time = time.time()
             
             response = await self.agent.ainvoke({
@@ -678,27 +693,28 @@ def setup_streamlit_ui():
             margin-top: 0.5rem;
         }
         .diet-plan-popup {
-            padding: 1rem;
+            padding: 0.8rem;
             border-radius: 0.5rem;
-            margin-top: 0.5rem;
-            margin-bottom: 1rem;
-            border: 1px solid #e6c619;
+            margin-top: 0.3rem;
+            margin-bottom: 0.5rem;
+            border: 2px solid #e6c619;
             background-color: #fff9c4;
             color: #333;
             font-size: 0.9rem;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
         .diet-plan-item {
-            margin: 0.2rem 0;
+            margin: 0.15rem 0;
+            font-size: 0.85rem;
         }
         .diet-plan-title {
             font-weight: bold;
-            color: #e6ac00;
-        }
-        .diet-plan-close {
-            float: right;
-            cursor: pointer;
-            color: #e6ac00;
-            font-weight: bold;
+            color: #e67300;
+            font-size: 1rem;
+            margin-bottom: 0.3rem;
+            text-align: center;
+            border-bottom: 1px solid #e6c619;
+            padding-bottom: 0.3rem;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -759,24 +775,6 @@ def main():
     st.title("🏥 Healthcare AI Assistant")
     st.markdown("### 💬 Chat Interface")
     
-    # Display current diet plan (if available)
-    if st.session_state.show_diet_plan and st.session_state.current_diet_plan:
-        diet_plan = st.session_state.current_diet_plan
-        
-        diet_container = st.container()
-        with diet_container:
-            st.markdown(f"""
-                <div class="diet-plan-popup">
-                    <div class="diet-plan-close" onclick="this.parentElement.style.display='none'">✕</div>
-                    <div class="diet-plan-title">🍽️ Suggested Diet Plan</div>
-                    <div class="diet-plan-item">🍳 <b>Breakfast:</b> {diet_plan.breakfast}</div>
-                    <div class="diet-plan-item">🥗 <b>Lunch:</b> {diet_plan.lunch}</div>
-                    <div class="diet-plan-item">🍲 <b>Dinner:</b> {diet_plan.dinner}</div>
-                    <div class="diet-plan-item">🥜 <b>Snacks:</b> {diet_plan.snacks}</div>
-                    <div class="diet-plan-item">📝 <b>Note:</b> {diet_plan.notes}</div>
-                </div>
-            """, unsafe_allow_html=True)
-    
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             if isinstance(message["content"], dict):
@@ -786,20 +784,19 @@ def main():
                     </div>
                 """, unsafe_allow_html=True)
                 
-                with st.expander("🔍 Detailed Agent Responses", expanded=False):
-                    for agent_name, response in message['content'].items():
-                        if agent_name != 'synthesis_agent' and agent_name != 'diet_plan':
-                            st.markdown(f"""
-                                <div class="agent-card">
-                                    <strong>{agent_name.replace('_', ' ').title()}</strong>
-                                    <div style="margin: 0.5rem 0;">
-                                        {response.content}
-                                    </div>
-                                    <div class="metadata-section">
-                                        Processing time: {response.processing_time:.2f}s
-                                    </div>
-                                </div>
-                            """, unsafe_allow_html=True)
+                # Display diet plan right after message if available
+                if 'diet_plan' in message['content']:
+                    diet_plan = message['content']['diet_plan']
+                    st.markdown(f"""
+                        <div class="diet-plan-popup">
+                            <div class="diet-plan-title">🍽️ Diet Plan for Kidney Stone</div>
+                            <div class="diet-plan-item">🍳 <b>Breakfast:</b> {diet_plan.breakfast}</div>
+                            <div class="diet-plan-item">🥗 <b>Lunch:</b> {diet_plan.lunch}</div>
+                            <div class="diet-plan-item">🍲 <b>Dinner:</b> {diet_plan.dinner}</div>
+                            <div class="diet-plan-item">🥜 <b>Snacks:</b> {diet_plan.snacks}</div>
+                            <div class="diet-plan-item">📝 <b>Note:</b> {diet_plan.notes}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
             else:
                 st.markdown(f"""
                     <div class="chat-message {message['role']}">
@@ -837,11 +834,19 @@ def main():
                         "content": responses
                     })
                     
-                    # Update diet plan
+                    # Show diet plan directly in this response
                     if 'diet_plan' in responses:
-                        st.session_state.current_diet_plan = responses['diet_plan']
-                        st.session_state.show_diet_plan = True
-                        st.rerun()
+                        diet_plan = responses['diet_plan']
+                        st.markdown(f"""
+                            <div class="diet-plan-popup">
+                                <div class="diet-plan-title">🍽️ Diet Plan for Kidney Stone</div>
+                                <div class="diet-plan-item">🍳 <b>Breakfast:</b> {diet_plan.breakfast}</div>
+                                <div class="diet-plan-item">🥗 <b>Lunch:</b> {diet_plan.lunch}</div>
+                                <div class="diet-plan-item">🍲 <b>Dinner:</b> {diet_plan.dinner}</div>
+                                <div class="diet-plan-item">🥜 <b>Snacks:</b> {diet_plan.snacks}</div>
+                                <div class="diet-plan-item">📝 <b>Note:</b> {diet_plan.notes}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
                 
             except Exception as e:
                 response_placeholder.error(f"An error occurred: {str(e)}")
