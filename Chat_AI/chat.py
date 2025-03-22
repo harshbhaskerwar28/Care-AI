@@ -841,7 +841,7 @@ def main():
                     if 'diet_plan' in responses:
                         st.session_state.current_diet_plan = responses['diet_plan']
                         st.session_state.show_diet_plan = True
-                        st.experimental_rerun()
+                        st.rerun()
                 
             except Exception as e:
                 response_placeholder.error(f"An error occurred: {str(e)}")
