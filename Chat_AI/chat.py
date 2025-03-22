@@ -40,6 +40,15 @@ class AgentResponse:
     metadata: Dict = None
     processing_time: float = 0.0
 
+@dataclass
+class DietPlan:
+    """Structure for storing diet plan information"""
+    breakfast: str
+    lunch: str
+    dinner: str
+    snacks: str
+    notes: str
+
 class DocumentProcessor:
     """Enhanced document processing with better error handling and progress tracking"""
     def __init__(self):
@@ -168,7 +177,8 @@ class AgentStatus:
             'diagnosis_agent': {'status': 'idle', 'progress': 0, 'message': ''},
             'treatment_agent': {'status': 'idle', 'progress': 0, 'message': ''},
             'research_agent': {'status': 'idle', 'progress': 0, 'message': ''},
-            'synthesis_agent': {'status': 'idle', 'progress': 0, 'message': ''}
+            'synthesis_agent': {'status': 'idle', 'progress': 0, 'message': ''},
+            'diet_agent': {'status': 'idle', 'progress': 0, 'message': ''}
         }
         
     def initialize_sidebar_placeholder(self):
@@ -238,6 +248,83 @@ class AgentStatus:
                 </div>
             </div>
         """, unsafe_allow_html=True)
+
+class DietAgent:
+    """Agent for generating personalized diet plans"""
+    def __init__(self):
+        self.llm = ChatGroq(
+            temperature=0.3,
+            model_name="llama3-8b-8192",
+            groq_api_key=os.getenv("GROQ_API_KEY")
+        )
+        self._initialize_prompt()
+
+    def _initialize_prompt(self):
+        """Initialize diet agent prompt"""
+        self.prompt = """You are a nutrition specialist. Be concise.
+Context: {context}
+Query: {query}
+Chat History: {chat_history}
+
+Based on the conversation, provide a simple and short diet plan with:
+1. Breakfast (1 item)
+2. Lunch (1 item)
+3. Dinner (1 item)
+4. Snacks (1 item)
+5. Brief note (1-2 words)
+
+Format as JSON with keys: breakfast, lunch, dinner, snacks, notes.
+Keep each suggestion under 5 words. Total response must be under 50 words."""
+
+        self.agent = ChatPromptTemplate.from_messages([
+            ("system", self.prompt),
+            ("human", "{input}")
+        ]) | self.llm | StrOutputParser()
+
+    async def generate_diet_plan(self, query: str, context: str, chat_history: str) -> DietPlan:
+        """Generate a diet plan based on the conversation"""
+        try:
+            start_time = time.time()
+            
+            response = await self.agent.ainvoke({
+                "input": query,
+                "context": context,
+                "query": query,
+                "chat_history": chat_history
+            })
+            
+            # Try to parse JSON response
+            try:
+                diet_data = json.loads(response)
+                diet_plan = DietPlan(
+                    breakfast=diet_data.get("breakfast", "Oatmeal with fruits"),
+                    lunch=diet_data.get("lunch", "Grilled chicken salad"),
+                    dinner=diet_data.get("dinner", "Baked fish with vegetables"),
+                    snacks=diet_data.get("snacks", "Yogurt with nuts"),
+                    notes=diet_data.get("notes", "Stay hydrated")
+                )
+            except json.JSONDecodeError:
+                # Fallback if response is not valid JSON
+                diet_plan = DietPlan(
+                    breakfast="Oatmeal with fruits",
+                    lunch="Grilled chicken salad",
+                    dinner="Baked fish with vegetables",
+                    snacks="Yogurt with nuts",
+                    notes="Stay hydrated"
+                )
+            
+            return diet_plan
+            
+        except Exception as e:
+            # Return default diet plan on error
+            return DietPlan(
+                breakfast="Oatmeal with fruits",
+                lunch="Grilled chicken salad", 
+                dinner="Baked fish with vegetables",
+                snacks="Yogurt with nuts",
+                notes="Stay hydrated"
+            )
+
 class HealthcareAgent:
     """Healthcare agent with concise response generation"""
     def __init__(self):
@@ -248,6 +335,7 @@ class HealthcareAgent:
         )
         self.chat_history = []
         self.doc_processor = DocumentProcessor()
+        self.diet_agent = DietAgent()
         self._initialize_prompts()
         self.agents = self._initialize_agents()
 
@@ -403,7 +491,7 @@ For simple queries (like greetings), respond in one short sentence."""
         self,
         query: str,
         status_callback
-    ) -> Dict[str, AgentResponse]:
+    ) -> Dict[str, Union[AgentResponse, DietPlan]]:
         """Process query through multi-agent system"""
         responses = {}
         context = await self.get_relevant_context(query)
@@ -423,18 +511,20 @@ For simple queries (like greetings), respond in one short sentence."""
             status_callback('diagnosis_agent', 'working', 0.2, "Analyzing symptoms")
             status_callback('treatment_agent', 'working', 0.2, "Evaluating treatments")
             status_callback('research_agent', 'working', 0.2, "Reviewing research")
+            status_callback('diet_agent', 'working', 0.2, "Creating diet plan")
 
             specialist_tasks = [
                 self._get_agent_response('diagnosis_agent', query, context, chat_history),
                 self._get_agent_response('treatment_agent', query, context, chat_history),
-                self._get_agent_response('research_agent', query, context, chat_history)
+                self._get_agent_response('research_agent', query, context, chat_history),
+                self.diet_agent.generate_diet_plan(query, context, chat_history)
             ]
 
             specialist_responses = await asyncio.gather(*specialist_tasks)
             
             for agent_name, response in zip(
                 ['diagnosis_agent', 'treatment_agent', 'research_agent'],
-                specialist_responses
+                specialist_responses[:-1]  # Exclude diet agent response
             ):
                 responses[agent_name] = response
                 status_callback(
@@ -443,6 +533,15 @@ For simple queries (like greetings), respond in one short sentence."""
                     1.0,
                     f"{agent_name.split('_')[0].title()} analysis complete"
                 )
+                
+            # Process diet plan
+            responses['diet_plan'] = specialist_responses[-1]
+            status_callback(
+                'diet_agent',
+                'completed',
+                1.0,
+                "Diet plan generated"
+            )
 
             status_callback('synthesis_agent', 'working', 0.5, "Synthesizing insights")
             final_response = await self._synthesize_responses(
@@ -469,6 +568,7 @@ For simple queries (like greetings), respond in one short sentence."""
         except Exception as e:
             for agent in self.agents.keys():
                 status_callback(agent, 'error', 0, str(e))
+            status_callback('diet_agent', 'error', 0, str(e))
             raise Exception(f"Query processing error: {str(e)}")
 
     async def _get_agent_response(
@@ -513,7 +613,7 @@ For simple queries (like greetings), respond in one short sentence."""
         query: str,
         context: str,
         chat_history: str,
-        responses: Dict[str, AgentResponse]
+        responses: Dict[str, Union[AgentResponse, DietPlan]]
     ) -> AgentResponse:
         """Synthesize final response from all agent responses"""
         try:
@@ -577,8 +677,32 @@ def setup_streamlit_ui():
             font-size: 0.75rem;
             margin-top: 0.5rem;
         }
+        .diet-plan-popup {
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-top: 0.5rem;
+            margin-bottom: 1rem;
+            border: 1px solid #e6c619;
+            background-color: #fff9c4;
+            color: #333;
+            font-size: 0.9rem;
+        }
+        .diet-plan-item {
+            margin: 0.2rem 0;
+        }
+        .diet-plan-title {
+            font-weight: bold;
+            color: #e6ac00;
+        }
+        .diet-plan-close {
+            float: right;
+            cursor: pointer;
+            color: #e6ac00;
+            font-weight: bold;
+        }
         </style>
     """, unsafe_allow_html=True)
+
 def main():
     """Main application with dark sidebar and enhanced UI"""
     setup_streamlit_ui()
@@ -591,6 +715,10 @@ def main():
         st.session_state.agent_status = AgentStatus()
     if "documents_processed" not in st.session_state:
         st.session_state.documents_processed = False
+    if "show_diet_plan" not in st.session_state:
+        st.session_state.show_diet_plan = False
+    if "current_diet_plan" not in st.session_state:
+        st.session_state.current_diet_plan = None
     
     with st.sidebar:
         st.markdown('<h3 style="color: #FFFFFF;">📋 Document Processing</h3>', unsafe_allow_html=True)
@@ -631,6 +759,24 @@ def main():
     st.title("🏥 Healthcare AI Assistant")
     st.markdown("### 💬 Chat Interface")
     
+    # Display current diet plan (if available)
+    if st.session_state.show_diet_plan and st.session_state.current_diet_plan:
+        diet_plan = st.session_state.current_diet_plan
+        
+        diet_container = st.container()
+        with diet_container:
+            st.markdown(f"""
+                <div class="diet-plan-popup">
+                    <div class="diet-plan-close" onclick="this.parentElement.style.display='none'">✕</div>
+                    <div class="diet-plan-title">🍽️ Suggested Diet Plan</div>
+                    <div class="diet-plan-item">🍳 <b>Breakfast:</b> {diet_plan.breakfast}</div>
+                    <div class="diet-plan-item">🥗 <b>Lunch:</b> {diet_plan.lunch}</div>
+                    <div class="diet-plan-item">🍲 <b>Dinner:</b> {diet_plan.dinner}</div>
+                    <div class="diet-plan-item">🥜 <b>Snacks:</b> {diet_plan.snacks}</div>
+                    <div class="diet-plan-item">📝 <b>Note:</b> {diet_plan.notes}</div>
+                </div>
+            """, unsafe_allow_html=True)
+    
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             if isinstance(message["content"], dict):
@@ -642,7 +788,7 @@ def main():
                 
                 with st.expander("🔍 Detailed Agent Responses", expanded=False):
                     for agent_name, response in message['content'].items():
-                        if agent_name != 'synthesis_agent':
+                        if agent_name != 'synthesis_agent' and agent_name != 'diet_plan':
                             st.markdown(f"""
                                 <div class="agent-card">
                                     <strong>{agent_name.replace('_', ' ').title()}</strong>
@@ -690,6 +836,12 @@ def main():
                         "role": "assistant",
                         "content": responses
                     })
+                    
+                    # Update diet plan
+                    if 'diet_plan' in responses:
+                        st.session_state.current_diet_plan = responses['diet_plan']
+                        st.session_state.show_diet_plan = True
+                        st.experimental_rerun()
                 
             except Exception as e:
                 response_placeholder.error(f"An error occurred: {str(e)}")
