@@ -620,7 +620,7 @@ For simple queries (like greetings), respond in one short sentence."""
             formatted_responses = "\n\n".join([
                 f"{name.upper()}:\n{response.content}"
                 for name, response in responses.items()
-                if name != 'synthesis_agent'
+                if name != 'synthesis_agent' and name != 'diet_plan' and hasattr(response, 'content')
             ])
 
             start_time = time.time()
