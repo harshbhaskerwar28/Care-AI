@@ -8,3 +8,6 @@ faiss-cpu
 typing-extensions
 asyncio
 langchain-community
+pillow
+agno
+requests 
