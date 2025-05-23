@@ -11,4 +11,5 @@ langchain-community
 pillow
 agno
 requests
-google-genai 
+google-genai
+duckduckgo-search 
