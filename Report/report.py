@@ -17,16 +17,66 @@ import time
 import requests
 import json
 import re
+from PIL import Image as PILImage
+from agno.agent import Agent
+from agno.models.google import Gemini
+from agno.tools.duckduckgo import DuckDuckGoTools
+from agno.media import Image as AgnoImage
 
 load_dotenv()
 
 # Configure Streamlit theme
 st.set_page_config(
-    page_title="Health Report Analyzer",
+    page_title="Health Analysis System",
     page_icon="🏥",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Initialize Google API Key for image analysis
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+if not GOOGLE_API_KEY:
+    st.error("⚠️ Please set your Google API Key in the environment variables")
+
+# Initialize the Medical Image Analysis Agent
+medical_agent = Agent(
+    model=Gemini(id="gemini-2.0-flash-exp"),
+    tools=[DuckDuckGoTools()],
+    markdown=True
+)
+
+# Medical Image Analysis Query
+IMAGE_ANALYSIS_QUERY = """
+You are a highly skilled medical imaging expert with extensive knowledge in radiology and diagnostic imaging. Analyze the medical image and structure your response as follows:
+
+### 1. Image Type & Region
+- Identify imaging modality (X-ray/MRI/CT/Ultrasound/etc.).
+- Specify anatomical region and positioning.
+- Evaluate image quality and technical adequacy.
+
+### 2. Key Findings
+- Highlight primary observations systematically.
+- Identify potential abnormalities with detailed descriptions.
+- Include measurements and densities where relevant.
+
+### 3. Diagnostic Assessment
+- Provide primary diagnosis with confidence level.
+- List differential diagnoses ranked by likelihood.
+- Support each diagnosis with observed evidence.
+- Highlight critical/urgent findings.
+
+### 4. Patient-Friendly Explanation
+- Simplify findings in clear, non-technical language.
+- Avoid medical jargon or provide easy definitions.
+- Include relatable visual analogies.
+
+### 5. Research Context
+- Use DuckDuckGo search to find recent medical literature.
+- Search for standard treatment protocols.
+- Provide 2-3 key references supporting the analysis.
+
+Ensure a structured and medically accurate response using clear markdown formatting.
+"""
 
 # CSS styling
 st.markdown("""
@@ -116,7 +166,8 @@ class AgentStatus:
             'recommendation_agent': {'status': 'idle', 'progress': 0, 'message': ''},
             'diet_planner': {'status': 'idle', 'progress': 0, 'message': ''},
             'web_search': {'status': 'idle', 'progress': 0, 'message': ''},
-            'chat_assistant': {'status': 'idle', 'progress': 0, 'message': ''}
+            'chat_assistant': {'status': 'idle', 'progress': 0, 'message': ''},
+            'image_analyzer': {'status': 'idle', 'progress': 0, 'message': ''}  # Added image analyzer status
         }
         
     def initialize_sidebar_placeholder(self):
@@ -657,6 +708,34 @@ class HealthReportAnalyzer:
             )
             return f"Error creating diet plan: {str(e)}"
 
+def analyze_medical_image(image_path):
+    """Processes and analyzes a medical image using AI."""
+    try:
+        # Open and resize image
+        image = PILImage.open(image_path)
+        width, height = image.size
+        aspect_ratio = width / height
+        new_width = 500
+        new_height = int(new_width / aspect_ratio)
+        resized_image = image.resize((new_width, new_height))
+
+        # Save resized image
+        temp_path = "temp_resized_image.png"
+        resized_image.save(temp_path)
+
+        # Create AgnoImage object
+        agno_image = AgnoImage(filepath=temp_path)
+
+        # Run AI analysis
+        response = medical_agent.run(IMAGE_ANALYSIS_QUERY, images=[agno_image])
+        return response.content
+    except Exception as e:
+        return f"⚠️ Analysis error: {e}"
+    finally:
+        # Clean up temporary file
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
 def handle_chat_input():
     """Handle chat input and response"""
     if "chat_messages" not in st.session_state:
@@ -764,129 +843,206 @@ def main():
         st.session_state.agent_status = AgentStatus()
     if 'diet_plan' not in st.session_state:
         st.session_state.diet_plan = None
+    if 'analysis_mode' not in st.session_state:
+        st.session_state.analysis_mode = 'report'  # Default to report analysis
     
     # Sidebar
     with st.sidebar:
-        st.title("🏥 Health Report Analyzer")
+        st.title("🏥 Health Analysis System")
         st.markdown("---")
         
-        # File upload in sidebar
-        uploaded_file = st.file_uploader(
-            "Upload your health report",
-            type=['pdf', 'txt'],
-            key='file_uploader'
+        # Analysis mode selector
+        analysis_mode = st.radio(
+            "Select Analysis Mode:",
+            ['Report Analysis', 'Image Analysis'],
+            key='mode_selector'
         )
+        st.session_state.analysis_mode = 'report' if analysis_mode == 'Report Analysis' else 'image'
         
-        if uploaded_file:
-            if st.button("🔍 Analyze Report", key='analyze_btn'):
-                try:
-                    # Read document
-                    if uploaded_file.type == "application/pdf":
-                        pdf_reader = PdfReader(uploaded_file)
-                        text = ""
-                        for page in pdf_reader.pages:
-                            text += page.extract_text()
-                    else:
-                        text = uploaded_file.getvalue().decode()
-                    
-                    st.session_state.report_text = text
-                    
-                    # Initialize agent status display after file upload
-                    st.session_state.agent_status.initialize_sidebar_placeholder()
-                    
-                    # Reset all agent statuses to idle
-                    for agent_name in st.session_state.agent_status.agents:
-                        st.session_state.agent_status.update_status(
-                            agent_name,
-                            'idle',
-                            0.0,
-                            'Waiting to start...'
-                        )
-                    
-                    # Analyze report with dynamic status updates
-                    st.session_state.report_results = asyncio.run(
-                        st.session_state.analyzer.analyze_report(
-                            text,
-                            st.session_state.agent_status
-                        )
-                    )
-                    
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"Error processing report: {str(e)}")
-        
-        # Display agent status after file upload section
-        if st.session_state.report_text:
-            st.session_state.agent_status.initialize_sidebar_placeholder()
-    
-    # Main content area
-    st.title("Health Report Analysis")
-    
-    if not st.session_state.report_results:
-        display_workflow()
-    else:
-        # Navigation tabs
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "✅ Positive Findings",
-            "⚠️ Areas of Concern",
-            "🥗 Personalized Diet Plan",
-            "📊 Full Report",
-            "💬 Chat Assistant"
-        ])
-        
-        with tab1:
-            if 'positive_analyzer' in st.session_state.report_results:
-                result = st.session_state.report_results['positive_analyzer']
-                st.markdown(result.content)
-        
-        with tab2:
-            if 'negative_analyzer' in st.session_state.report_results:
-                result = st.session_state.report_results['negative_analyzer']
-                st.markdown(result.content)
-                
-                # Add button to generate diet plan
-                if st.button("🥗 Generate Personalized Diet Plan", key="generate_diet_btn"):
-                    st.session_state.agent_status.update_status(
-                        'diet_planner',
-                        'working',
-                        0.1,
-                        'Starting diet plan generation...'
-                    )
-                    
-                    with st.spinner("Generating your personalized diet plan..."):
-                        diet_plan = asyncio.run(
-                            st.session_state.analyzer.generate_diet_plan(
-                                st.session_state.report_text,
+        if st.session_state.analysis_mode == 'report':
+            # File upload for reports
+            uploaded_file = st.file_uploader(
+                "Upload your health report",
+                type=['pdf', 'txt'],
+                key='report_uploader'
+            )
+            
+            if uploaded_file:
+                if st.button("🔍 Analyze Report", key='analyze_report_btn'):
+                    try:
+                        # Read document
+                        if uploaded_file.type == "application/pdf":
+                            pdf_reader = PdfReader(uploaded_file)
+                            text = ""
+                            for page in pdf_reader.pages:
+                                text += page.extract_text()
+                        else:
+                            text = uploaded_file.getvalue().decode()
+                        
+                        st.session_state.report_text = text
+                        
+                        # Initialize agent status display
+                        st.session_state.agent_status.initialize_sidebar_placeholder()
+                        
+                        # Reset all agent statuses
+                        for agent_name in st.session_state.agent_status.agents:
+                            st.session_state.agent_status.update_status(
+                                agent_name,
+                                'idle',
+                                0.0,
+                                'Waiting to start...'
+                            )
+                        
+                        # Analyze report
+                        st.session_state.report_results = asyncio.run(
+                            st.session_state.analyzer.analyze_report(
+                                text,
                                 st.session_state.agent_status
                             )
                         )
-                        st.session_state.diet_plan = diet_plan
+                        
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Error processing report: {str(e)}")
+        else:
+            # File upload for images
+            uploaded_image = st.file_uploader(
+                "Upload your medical image",
+                type=['jpg', 'jpeg', 'png', 'bmp'],
+                key='image_uploader'
+            )
+            
+            if uploaded_image:
+                if st.button("🔍 Analyze Image", key='analyze_image_btn'):
+                    try:
+                        # Update image analyzer status
+                        st.session_state.agent_status.update_status(
+                            'image_analyzer',
+                            'working',
+                            0.5,
+                            'Analyzing image...'
+                        )
+                        
+                        # Save uploaded image temporarily
+                        image_path = f"temp_image.{uploaded_image.type.split('/')[1]}"
+                        with open(image_path, "wb") as f:
+                            f.write(uploaded_image.getbuffer())
+                        
+                        # Analyze image
+                        analysis_result = analyze_medical_image(image_path)
+                        
+                        # Store result in session state
+                        st.session_state.image_analysis_result = analysis_result
+                        
+                        # Update status
+                        st.session_state.agent_status.update_status(
+                            'image_analyzer',
+                            'completed',
+                            1.0,
+                            'Analysis complete'
+                        )
+                        
+                        # Clean up
+                        os.remove(image_path)
+                        
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Error analyzing image: {str(e)}")
+                        st.session_state.agent_status.update_status(
+                            'image_analyzer',
+                            'error',
+                            1.0,
+                            f'Error: {str(e)}'
+                        )
+    
+    # Main content area
+    st.title("Health Analysis System")
+    
+    if st.session_state.analysis_mode == 'report':
+        if not st.session_state.report_results:
+            display_workflow()
+        else:
+            # Report analysis tabs
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "✅ Positive Findings",
+                "⚠️ Areas of Concern",
+                "🥗 Personalized Diet Plan",
+                "📊 Full Report",
+                "💬 Chat Assistant"
+            ])
+            
+            with tab1:
+                if 'positive_analyzer' in st.session_state.report_results:
+                    result = st.session_state.report_results['positive_analyzer']
+                    st.markdown(result.content)
+            
+            with tab2:
+                if 'negative_analyzer' in st.session_state.report_results:
+                    result = st.session_state.report_results['negative_analyzer']
+                    st.markdown(result.content)
                     
-                    # Switch to diet plan tab
-                    st.rerun()
-        
-        with tab3:
-            if st.session_state.diet_plan:
-                st.markdown(st.session_state.diet_plan)
-            else:
-                st.info("No diet plan generated yet. Go to 'Areas of Concern' tab and click 'Generate Personalized Diet Plan'.")
-        
-        with tab4:
-            if 'document_processor' in st.session_state.report_results:
-                st.subheader("Document Analysis")
-                st.markdown(st.session_state.report_results['document_processor'].content)
+                    # Add button to generate diet plan
+                    if st.button("🥗 Generate Personalized Diet Plan", key="generate_diet_btn"):
+                        st.session_state.agent_status.update_status(
+                            'diet_planner',
+                            'working',
+                            0.1,
+                            'Starting diet plan generation...'
+                        )
+                        
+                        with st.spinner("Generating your personalized diet plan..."):
+                            diet_plan = asyncio.run(
+                                st.session_state.analyzer.generate_diet_plan(
+                                    st.session_state.report_text,
+                                    st.session_state.agent_status
+                                )
+                            )
+                            st.session_state.diet_plan = diet_plan
+                        
+                        # Switch to diet plan tab
+                        st.rerun()
             
-            if 'summary_agent' in st.session_state.report_results:
-                st.subheader("Summary")
-                st.markdown(st.session_state.report_results['summary_agent'].content)
+            with tab3:
+                if st.session_state.diet_plan:
+                    st.markdown(st.session_state.diet_plan)
+                else:
+                    st.info("No diet plan generated yet. Go to 'Areas of Concern' tab and click 'Generate Personalized Diet Plan'.")
             
-            if 'recommendation_agent' in st.session_state.report_results:
-                st.subheader("Recommendations")
-                st.markdown(st.session_state.report_results['recommendation_agent'].content)
-        
-        with tab5:
-            handle_chat_input()
+            with tab4:
+                if 'document_processor' in st.session_state.report_results:
+                    st.subheader("Document Analysis")
+                    st.markdown(st.session_state.report_results['document_processor'].content)
+                
+                if 'summary_agent' in st.session_state.report_results:
+                    st.subheader("Summary")
+                    st.markdown(st.session_state.report_results['summary_agent'].content)
+                
+                if 'recommendation_agent' in st.session_state.report_results:
+                    st.subheader("Recommendations")
+                    st.markdown(st.session_state.report_results['recommendation_agent'].content)
+            
+            with tab5:
+                handle_chat_input()
+    else:
+        # Image analysis display
+        if 'image_analysis_result' in st.session_state:
+            # Display uploaded image and analysis
+            col1, col2 = st.columns([1, 2])
+            
+            with col1:
+                st.image(
+                    st.session_state.image_uploader,
+                    caption="Uploaded Medical Image",
+                    use_column_width=True
+                )
+            
+            with col2:
+                st.markdown("### 📋 Image Analysis Report")
+                st.markdown(st.session_state.image_analysis_result)
+        else:
+            display_workflow()
 
 if __name__ == "__main__":
     main()
