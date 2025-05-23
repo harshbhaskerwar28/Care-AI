@@ -158,7 +158,7 @@ class AgentStatus:
     """Enhanced agent status management with sidebar display"""
     def __init__(self):
         self.sidebar_placeholder = None
-        self.agents = {
+        self.report_agents = {
             'document_processor': {'status': 'idle', 'progress': 0, 'message': ''},
             'positive_analyzer': {'status': 'idle', 'progress': 0, 'message': ''},
             'negative_analyzer': {'status': 'idle', 'progress': 0, 'message': ''},
@@ -166,9 +166,12 @@ class AgentStatus:
             'recommendation_agent': {'status': 'idle', 'progress': 0, 'message': ''},
             'diet_planner': {'status': 'idle', 'progress': 0, 'message': ''},
             'web_search': {'status': 'idle', 'progress': 0, 'message': ''},
-            'chat_assistant': {'status': 'idle', 'progress': 0, 'message': ''},
-            'image_analyzer': {'status': 'idle', 'progress': 0, 'message': ''}  # Added image analyzer status
+            'chat_assistant': {'status': 'idle', 'progress': 0, 'message': ''}
         }
+        self.image_agents = {
+            'image_analyzer': {'status': 'idle', 'progress': 0, 'message': ''}
+        }
+        self.agents = {**self.report_agents, **self.image_agents}
         
     def initialize_sidebar_placeholder(self):
         """Initialize the sidebar placeholder"""
@@ -178,21 +181,28 @@ class AgentStatus:
     
     def update_status(self, agent_name: str, status: str, progress: float, message: str = ""):
         """Update agent status and refresh sidebar display"""
-        self.agents[agent_name] = {
-            'status': status,
-            'progress': progress,
-            'message': message
-        }
-        self._render_status()
+        if agent_name in self.agents:
+            self.agents[agent_name] = {
+                'status': status,
+                'progress': progress,
+                'message': message
+            }
+            self._render_status()
 
     def _render_status(self):
-        """Render status in sidebar"""
+        """Render status in sidebar based on current mode"""
         if self.sidebar_placeholder is None:
             self.initialize_sidebar_placeholder()
             
         with self.sidebar_placeholder.container():
-            for agent_name, status in self.agents.items():
-                self._render_agent_card(agent_name, status)
+            # Only show relevant agents based on mode
+            if st.session_state.get('analysis_mode') == 'image':
+                agents_to_show = self.image_agents
+            else:
+                agents_to_show = self.report_agents
+                
+            for agent_name, status in agents_to_show.items():
+                self._render_agent_card(agent_name, self.agents[agent_name])
 
     def _render_agent_card(self, agent_name: str, status: dict):
         """Render individual agent status card in sidebar"""
@@ -1027,20 +1037,29 @@ def main():
                 handle_chat_input()
     else:
         # Image analysis display
-        if 'image_analysis_result' in st.session_state:
-            # Display uploaded image and analysis
+        if 'image_analysis_result' in st.session_state and 'image_uploader' in st.session_state:
+            # Create two columns with different widths
             col1, col2 = st.columns([1, 2])
             
             with col1:
                 st.image(
                     st.session_state.image_uploader,
                     caption="Uploaded Medical Image",
-                    use_column_width=True
+                    use_container_width=True  # Updated from use_column_width
                 )
             
             with col2:
                 st.markdown("### 📋 Image Analysis Report")
-                st.markdown(st.session_state.image_analysis_result)
+                # Only display the first occurrence of the analysis
+                if st.session_state.image_analysis_result:
+                    # Split the result at the first occurrence of "1. Image Type & Region"
+                    parts = st.session_state.image_analysis_result.split("1. Image Type & Region", 1)
+                    if len(parts) > 1:
+                        # Display only the first complete analysis
+                        st.markdown("1. Image Type & Region" + parts[1])
+                    else:
+                        # If splitting didn't work, display the original result
+                        st.markdown(st.session_state.image_analysis_result)
         else:
             display_workflow()
 
