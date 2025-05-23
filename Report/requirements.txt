@@ -11,4 +11,4 @@ langchain-community
 pillow
 agno
 requests
-google-generativeai 
+google-genai 
