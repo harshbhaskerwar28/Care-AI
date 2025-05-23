@@ -10,4 +10,5 @@ asyncio
 langchain-community
 pillow
 agno
-requests 
+requests
+google-generativeai 
