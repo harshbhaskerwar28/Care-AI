@@ -70,17 +70,7 @@ You are a highly skilled medical imaging expert with extensive knowledge in radi
 - Avoid medical jargon or provide easy definitions.
 - Include relatable visual analogies.
 
-### 5. Research Context
-- Use DuckDuckGo search to find recent medical literature about the specific condition(s) identified.
-- Provide at least three key points about standard treatment protocols for the identified condition(s).
-- Include 2-3 specific references to medical literature or guidelines.
-- Discuss typical prognosis and recovery timeline.
-- Mention any recent advances in treatment for this type of injury.
-
-Remember to be thorough in your research context section, providing specific treatment guidelines, recovery timelines, and evidence-based recommendations from current medical literature.
-
-Ensure a structured and medically accurate response using clear markdown formatting.
-"""
+Ensure a structured and medically accurate response using clear markdown formatting."""
 
 # CSS styling
 st.markdown("""
@@ -1063,21 +1053,20 @@ def main():
                         "1. Image Type & Region",
                         "2. Key Findings",
                         "3. Diagnostic Assessment",
-                        "4. Patient-Friendly Explanation",
-                        "5. Research Context"
+                        "4. Patient-Friendly Explanation"
                     ]
                     
                     # Find the first occurrence of the first section
                     start_idx = analysis.find(sections[0])
                     if start_idx != -1:
-                        # Find the next occurrence of the first section
-                        next_analysis_idx = analysis.find(sections[0], start_idx + 1)
+                        # Find the start of the research context section
+                        research_idx = analysis.find("5. Research Context", start_idx)
                         
-                        if next_analysis_idx != -1:
-                            # Only show up to the start of the next analysis
-                            analysis = analysis[start_idx:next_analysis_idx].strip()
+                        if research_idx != -1:
+                            # Only show up to the research context section
+                            analysis = analysis[start_idx:research_idx].strip()
                         else:
-                            # If no second analysis found, show from start of first analysis to end
+                            # If no research context found, show from start of first analysis
                             analysis = analysis[start_idx:].strip()
                         
                         # Display the cleaned analysis
