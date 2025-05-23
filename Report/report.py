@@ -1045,20 +1045,41 @@ def main():
                 st.image(
                     st.session_state.image_uploader,
                     caption="Uploaded Medical Image",
-                    use_container_width=True  # Updated from use_column_width
+                    use_container_width=True
                 )
             
             with col2:
                 st.markdown("### 📋 Image Analysis Report")
-                # Only display the first occurrence of the analysis
                 if st.session_state.image_analysis_result:
-                    # Split the result at the first occurrence of "1. Image Type & Region"
-                    parts = st.session_state.image_analysis_result.split("1. Image Type & Region", 1)
-                    if len(parts) > 1:
-                        # Display only the first complete analysis
-                        st.markdown("1. Image Type & Region" + parts[1])
+                    # Extract the first complete analysis
+                    analysis = st.session_state.image_analysis_result
+                    
+                    # Find all section starts
+                    sections = [
+                        "1. Image Type & Region",
+                        "2. Key Findings",
+                        "3. Diagnostic Assessment",
+                        "4. Patient-Friendly Explanation",
+                        "5. Research Context"
+                    ]
+                    
+                    # Find the first occurrence of the first section
+                    start_idx = analysis.find(sections[0])
+                    if start_idx != -1:
+                        # Find the next occurrence of the first section
+                        next_analysis_idx = analysis.find(sections[0], start_idx + 1)
+                        
+                        if next_analysis_idx != -1:
+                            # Only show up to the start of the next analysis
+                            analysis = analysis[start_idx:next_analysis_idx].strip()
+                        else:
+                            # If no second analysis found, show from start of first analysis to end
+                            analysis = analysis[start_idx:].strip()
+                        
+                        # Display the cleaned analysis
+                        st.markdown(analysis)
                     else:
-                        # If splitting didn't work, display the original result
+                        # Fallback: display the original result
                         st.markdown(st.session_state.image_analysis_result)
         else:
             display_workflow()
