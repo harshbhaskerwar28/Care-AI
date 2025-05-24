@@ -997,13 +997,21 @@ def main():
                                 'Starting diet plan generation...'
                             )
                             
-                            with st.spinner("Generating your personalized diet plan..."):
-                                diet_plan = asyncio.run(
-                                    st.session_state.analyzer.generate_diet_plan(
-                                        st.session_state.report_text,
-                                        st.session_state.agent_status
-                                    )
+                            # Create a placeholder for progress
+                            progress_placeholder = st.empty()
+                            with progress_placeholder.container():
+                                st.info("Generating your personalized diet plan... Please wait.")
+                            
+                            # Generate diet plan
+                            diet_plan = asyncio.run(
+                                st.session_state.analyzer.generate_diet_plan(
+                                    st.session_state.report_text,
+                                    st.session_state.agent_status
                                 )
+                            )
+                            
+                            if diet_plan and not diet_plan.startswith("Error"):
+                                # Store the diet plan in session state
                                 st.session_state.diet_plan = diet_plan
                                 
                                 # Update status after successful generation
@@ -1014,8 +1022,22 @@ def main():
                                     'Diet plan generated successfully'
                                 )
                                 
-                                # Switch to diet plan tab
-                                st.rerun()
+                                # Clear the progress message
+                                progress_placeholder.empty()
+                                
+                                # Show success message
+                                st.success("Diet plan generated successfully! Check the 'Personalized Diet Plan' tab.")
+                            else:
+                                # Handle empty or error response
+                                progress_placeholder.empty()
+                                st.error("Failed to generate diet plan. Please try again.")
+                                st.session_state.agent_status.update_status(
+                                    'diet_planner',
+                                    'error',
+                                    1.0,
+                                    'Failed to generate diet plan'
+                                )
+                                
                         except Exception as e:
                             st.error(f"Error generating diet plan: {str(e)}")
                             st.session_state.agent_status.update_status(
@@ -1027,7 +1049,10 @@ def main():
             
             with tab3:
                 if st.session_state.diet_plan:
-                    st.markdown(st.session_state.diet_plan)
+                    try:
+                        st.markdown(st.session_state.diet_plan)
+                    except Exception as e:
+                        st.error(f"Error displaying diet plan: {str(e)}")
                 else:
                     st.info("No diet plan generated yet. Go to 'Areas of Concern' tab and click 'Generate Personalized Diet Plan'.")
             
