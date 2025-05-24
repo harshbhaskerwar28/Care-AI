@@ -558,27 +558,6 @@ class HealthReportAnalyzer:
             st.error(error_message)
             return f"I apologize, but I encountered an error: {str(e)}"
 
-    async def web_search_diet_info(self, abnormal_conditions: List[str]) -> str:
-        """Search the web for diet recommendations based on abnormal conditions"""
-        try:
-            search_results = []
-            
-            for condition in abnormal_conditions:
-                search_query = f"evidence based diet recommendations for {condition}"
-                
-                # Simulate web search results
-                search_result = f"### Diet Information for {condition}\n"
-                search_result += "Based on recent medical research:\n"
-                search_result += "- Recommended foods: [would be populated from actual search]\n"
-                search_result += "- Foods to avoid: [would be populated from actual search]\n"
-                search_result += "- Recent studies suggest: [would be populated from actual search]\n\n"
-                
-                search_results.append(search_result)
-            
-            return "\n".join(search_results)
-        except Exception as e:
-            return f"Error searching for diet information: {str(e)}"
-
     async def extract_abnormal_conditions(self, report_text: str) -> List[str]:
         """Extract abnormal conditions from the report text"""
         try:
@@ -609,6 +588,27 @@ class HealthReportAnalyzer:
         except Exception as e:
             st.error(f"Error extracting conditions: {str(e)}")
             return []
+
+    async def web_search_diet_info(self, abnormal_conditions: List[str]) -> str:
+        """Search the web for diet recommendations based on abnormal conditions"""
+        try:
+            search_results = []
+            
+            for condition in abnormal_conditions:
+                search_query = f"evidence based diet recommendations for {condition}"
+                
+                # Simulate web search results
+                search_result = f"### Diet Information for {condition}\n"
+                search_result += "Based on recent medical research:\n"
+                search_result += "- Recommended foods: [would be populated from actual search]\n"
+                search_result += "- Foods to avoid: [would be populated from actual search]\n"
+                search_result += "- Recent studies suggest: [would be populated from actual search]\n\n"
+                
+                search_results.append(search_result)
+            
+            return "\n".join(search_results)
+        except Exception as e:
+            return f"Error searching for diet information: {str(e)}"
 
     async def generate_diet_plan(self, report_text: str, agent_status: AgentStatus) -> str:
         """Generate comprehensive diet plan based on report findings"""
