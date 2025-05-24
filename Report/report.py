@@ -989,70 +989,28 @@ def main():
                     
                     # Add button to generate diet plan
                     if st.button("🥗 Generate Personalized Diet Plan", key="generate_diet_btn"):
-                        try:
-                            st.session_state.agent_status.update_status(
-                                'diet_planner',
-                                'working',
-                                0.1,
-                                'Starting diet plan generation...'
-                            )
-                            
-                            # Create a placeholder for progress
-                            progress_placeholder = st.empty()
-                            with progress_placeholder.container():
-                                st.info("Generating your personalized diet plan... Please wait.")
-                            
-                            # Generate diet plan
+                        st.session_state.agent_status.update_status(
+                            'diet_planner',
+                            'working',
+                            0.1,
+                            'Starting diet plan generation...'
+                        )
+                        
+                        with st.spinner("Generating your personalized diet plan..."):
                             diet_plan = asyncio.run(
                                 st.session_state.analyzer.generate_diet_plan(
                                     st.session_state.report_text,
                                     st.session_state.agent_status
                                 )
                             )
-                            
-                            if diet_plan and not diet_plan.startswith("Error"):
-                                # Store the diet plan in session state
-                                st.session_state.diet_plan = diet_plan
-                                
-                                # Update status after successful generation
-                                st.session_state.agent_status.update_status(
-                                    'diet_planner',
-                                    'completed',
-                                    1.0,
-                                    'Diet plan generated successfully'
-                                )
-                                
-                                # Clear the progress message
-                                progress_placeholder.empty()
-                                
-                                # Show success message
-                                st.success("Diet plan generated successfully! Check the 'Personalized Diet Plan' tab.")
-                            else:
-                                # Handle empty or error response
-                                progress_placeholder.empty()
-                                st.error("Failed to generate diet plan. Please try again.")
-                                st.session_state.agent_status.update_status(
-                                    'diet_planner',
-                                    'error',
-                                    1.0,
-                                    'Failed to generate diet plan'
-                                )
-                                
-                        except Exception as e:
-                            st.error(f"Error generating diet plan: {str(e)}")
-                            st.session_state.agent_status.update_status(
-                                'diet_planner',
-                                'error',
-                                1.0,
-                                f'Error: {str(e)}'
-                            )
+                            st.session_state.diet_plan = diet_plan
+                        
+                        # Switch to diet plan tab
+                        st.rerun()
             
             with tab3:
                 if st.session_state.diet_plan:
-                    try:
-                        st.markdown(st.session_state.diet_plan)
-                    except Exception as e:
-                        st.error(f"Error displaying diet plan: {str(e)}")
+                    st.markdown(st.session_state.diet_plan)
                 else:
                     st.info("No diet plan generated yet. Go to 'Areas of Concern' tab and click 'Generate Personalized Diet Plan'.")
             
