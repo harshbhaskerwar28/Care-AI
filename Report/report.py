@@ -989,24 +989,41 @@ def main():
                     
                     # Add button to generate diet plan
                     if st.button("🥗 Generate Personalized Diet Plan", key="generate_diet_btn"):
-                        st.session_state.agent_status.update_status(
-                            'diet_planner',
-                            'working',
-                            0.1,
-                            'Starting diet plan generation...'
-                        )
-                        
-                        with st.spinner("Generating your personalized diet plan..."):
-                            diet_plan = asyncio.run(
-                                st.session_state.analyzer.generate_diet_plan(
-                                    st.session_state.report_text,
-                                    st.session_state.agent_status
-                                )
+                        try:
+                            st.session_state.agent_status.update_status(
+                                'diet_planner',
+                                'working',
+                                0.1,
+                                'Starting diet plan generation...'
                             )
-                            st.session_state.diet_plan = diet_plan
-                        
-                        # Switch to diet plan tab
-                        st.rerun()
+                            
+                            with st.spinner("Generating your personalized diet plan..."):
+                                diet_plan = asyncio.run(
+                                    st.session_state.analyzer.generate_diet_plan(
+                                        st.session_state.report_text,
+                                        st.session_state.agent_status
+                                    )
+                                )
+                                st.session_state.diet_plan = diet_plan
+                                
+                                # Update status after successful generation
+                                st.session_state.agent_status.update_status(
+                                    'diet_planner',
+                                    'completed',
+                                    1.0,
+                                    'Diet plan generated successfully'
+                                )
+                                
+                                # Switch to diet plan tab
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"Error generating diet plan: {str(e)}")
+                            st.session_state.agent_status.update_status(
+                                'diet_planner',
+                                'error',
+                                1.0,
+                                f'Error: {str(e)}'
+                            )
             
             with tab3:
                 if st.session_state.diet_plan:
